@@ -1,0 +1,64 @@
+{
+    "name": "langsys/laravel-sdk",
+    "description": "Laravel integration for the Langsys translation SDK — service provider, @t Blade directive, locale-detection middleware, Livewire support, and Inertia SSR seeding over langsys/php-sdk.",
+    "keywords": ["i18n", "l10n", "laravel", "livewire", "inertia", "blade", "localization", "internationalization", "translation", "langsys", "sdk"],
+    "homepage": "https://github.com/langsys/langsys-laravel",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Langsys"
+        }
+    ],
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0 || ^11.0 || ^12.0",
+        "illuminate/contracts": "^10.0 || ^11.0 || ^12.0",
+        "langsys/php-sdk": "dev-main"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.22 || ^9.0 || ^10.0",
+        "phpunit/phpunit": "^10.5 || ^11.0"
+    },
+    "suggest": {
+        "ext-intl": "Locale-aware ICU pluralization and number/date formatting in interpolated phrases",
+        "livewire/livewire": "Translations inside Livewire components re-resolve on every update through the same middleware",
+        "inertiajs/inertia-laravel": "Seed the JS SDKs' initialTranslations via InertiaSsrProps::share()"
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/langsys/langsys-php"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Langsys\\Laravel\\": "src/"
+        },
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Langsys\\Laravel\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Langsys\\Laravel\\LangsysServiceProvider"
+            ],
+            "aliases": {
+                "Langsys": "Langsys\\Laravel\\Facades\\Langsys"
+            }
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true
+    }
+}

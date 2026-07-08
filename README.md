@@ -1,0 +1,169 @@
+# Langsys SDK - Laravel
+
+Langsys revolutionizes localization for apps with easy to integrate, realtime, continuous translations. Read more about Langsys Translation Manager [at the website](https://Langsys.dev/).
+
+Integrate the Langsys Translation Manager into your Laravel application — Blade, Livewire, Alpine's server-rendered content, and Inertia SSR seeding for the JS SDKs.
+
+## Requirements
+
+- **PHP 8.1+**, **Laravel 10, 11, or 12**
+- `ext-intl` recommended (locale-aware ICU pluralization and number/date formatting)
+
+## How it's layered
+
+`langsys/laravel-sdk` is a Laravel wrapper over the dependency-free [`langsys/php-sdk`](https://github.com/langsys/langsys-php) — which owns the HTTP client, phrase lookup, token discovery/queueing, and catalog caching. This package adds only the Laravel-native concerns:
+
+- A **service provider** that builds the SDK `Client` from `config/langsys.php` and routes catalog caching through **Laravel's cache** (any store — redis, memcached, file, array)
+- A **`t()` helper and `@t` Blade directive** with `{name}` interpolation and ICU pluralization — the same phrase syntax as the Langsys JS SDKs, so one catalog serves your whole stack
+- A **`DetectLocale` middleware** resolving the request locale (query → cookie → session → `Accept-Language`)
+- A **`FlushPendingRegistrations` terminable middleware** (plus an Octane listener) that sends newly discovered phrases to Langsys *after* the response
+- An **`InertiaSsrProps` helper** that seeds the JS SDKs' `initialTranslations` for SSR handoff
+
+## Install
+
+```bash
+composer require langsys/laravel-sdk
+php artisan vendor:publish --tag=langsys-config
+```
+
+Set your credentials in `.env`:
+
+```dotenv
+LANGSYS_API_KEY=your-api-key
+LANGSYS_PROJECT_ID=your-project-id
+```
+
+### API key permissions
+
+- **Write key** (development): phrases rendered through `t()` / `@t` that aren't in the catalog yet are queued and auto-registered at the end of the request.
+- **Read-only key** (production): lookups only — no token creation.
+
+The key type is detected server-side; there is no local toggle.
+
+## Setup
+
+Add the middleware to your `web` group (or per-route via the `langsys.locale` / `langsys.flush` aliases):
+
+```php
+// Laravel 11/12: bootstrap/app.php
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->web(append: [
+        \Langsys\Laravel\Http\Middleware\DetectLocale::class,
+        \Langsys\Laravel\Http\Middleware\FlushPendingRegistrations::class,
+    ]);
+})
+```
+
+## Using translations
+
+### `t()` and `@t` — the everyday API
+
+The signature mirrors the JS SDKs: **`t($phrase, $category?, $params?, $locale?)`**. The phrase is both the lookup key and the base-language default — no keys file.
+
+```blade
+<h1>@t('Welcome to my app', 'UI')</h1>
+<p>@t('Hello, {name}! You have {count} new messages.', 'Greetings', ['name' => $name, 'count' => $count])</p>
+```
+
+```php
+// Controllers, Livewire components, jobs, mail — anywhere:
+$title = t('Order confirmed', 'Checkout');
+$body  = t('Your order {id} ships on {date}.', 'Checkout', ['id' => (string) $order->number, 'date' => $order->ships_at]);
+```
+
+Output through `@t` is HTML-escaped like `{{ }}`.
+
+#### Interpolation & pluralization
+
+`{name}` placeholders use the **same syntax as the JS SDKs**, so the same phrase translates once and renders everywhere. Numbers and `DateTimeInterface` values are CLDR-formatted for the target locale (pass strings to opt out); ICU MessageFormat pluralization works when `ext-intl` is present:
+
+```php
+t('{count, plural, one {# item} other {# items}}', 'Cart', ['count' => $count]);
+```
+
+Unknown placeholders are left visible rather than rendering empty.
+
+#### Categorization disambiguates context
+
+```blade
+<strong>@t('Home', 'Main Menu')</strong>      {{-- "Inicio" --}}
+<strong>@t('Home', 'Home repairs')</strong>   {{-- "Hogar" --}}
+```
+
+### Locale detection
+
+`DetectLocale` tries the configured sources in order (`query`, `cookie`, `session`, `header` by default), canonicalizes the winner to BCP 47, and sets it on both the Laravel app and the Langsys client. An explicit `?locale=es-ES` choice persists via cookie (or session — see `config/langsys.php`). The locale cookie is exempted from cookie encryption so client-side JS can share the preference.
+
+### Token discovery & flushing
+
+With a write key, phrases that miss the catalog are queued in-memory during the request and flushed to Langsys **after the response is sent** — by the terminable middleware under PHP-FPM, and by a `RequestTerminated` listener under **Octane** (where PHP's shutdown handlers never fire between requests). Read-only keys skip the flush silently. Disable with `LANGSYS_AUTO_FLUSH=false` and flush manually via `app(\Langsys\SDK\Client::class)->flushPendingRegistrations()`.
+
+### Livewire
+
+Nothing extra to configure: Livewire's AJAX updates run through the same `web` middleware, so `t()` inside components resolves in the page's locale and newly discovered phrases flush after every update.
+
+```php
+class Checkout extends Component
+{
+    public function getTitleProperty(): string
+    {
+        return t('Review your order', 'Checkout');
+    }
+}
+```
+
+### Inertia SSR seeding (Vue/React/Svelte SDKs)
+
+Hand the server-fetched catalog to the JS SDK so the client skips its initial fetch:
+
+```php
+// app/Http/Middleware/HandleInertiaRequests.php
+use Langsys\Laravel\Support\InertiaSsrProps;
+
+public function share(Request $request): array
+{
+    return [...parent::share($request), ...InertiaSsrProps::share()];
+}
+```
+
+```typescript
+// resources/js — Vue example (same shape for React/Svelte)
+import { LangsysApp, useLocaleStore } from 'langsys-js-vue';
+
+const { store } = useLocaleStore(props.langsys.initialTranslationsLocale);
+LangsysApp.init({
+    projectid: import.meta.env.VITE_LANGSYS_PROJECT_ID,
+    key: import.meta.env.VITE_LANGSYS_API_KEY, // read-only key on the client
+    UserLocaleStore: store,
+    initialTranslations: props.langsys.initialTranslations,
+    initialTranslationsLocale: props.langsys.initialTranslationsLocale,
+});
+```
+
+### The facade and the raw client
+
+```php
+use Langsys\Laravel\Facades\Langsys;
+
+Langsys::translate('Save', 'UI');
+Langsys::client()->getTranslations('es-es');   // vanilla langsys/php-sdk Client
+Langsys::client()->translatePage($html);       // full-page HTML translation
+```
+
+## Configuration reference
+
+See [`config/langsys.php`](config/langsys.php): credentials (`LANGSYS_API_KEY`, `LANGSYS_PROJECT_ID`, `LANGSYS_API_URL`), catalog cache (Laravel store/prefix/TTL), locale-detection sources and persistence, and `auto_flush`.
+
+## Testing your app
+
+Bind a fake client so tests never hit the API:
+
+```php
+$this->app->instance(\Langsys\SDK\Client::class, $yourFakeClient);
+```
+
+This package's own suite (`composer test`) shows a complete `FakeClient` pattern in `tests/Fakes/FakeClient.php`.
+
+## License
+
+MIT © Langsys
