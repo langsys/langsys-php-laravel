@@ -100,7 +100,7 @@ With a write key, phrases that miss the catalog are queued in-memory during the 
 
 ### Livewire
 
-Nothing extra to configure: Livewire's AJAX updates run through the same `web` middleware, so `t()` inside components resolves in the page's locale and newly discovered phrases flush after every update.
+Nothing extra to configure: Livewire's AJAX updates run through the same `web` middleware, so `t()` inside components resolves in the page's locale and newly discovered phrases flush after every update. Verified end-to-end in `tests/LivewireSupportTest.php` — a real component renders `@t` with interpolation, and a phrase that only appears after an interaction is discovered on the Livewire update and drained by the flush middleware.
 
 ```php
 class Checkout extends Component

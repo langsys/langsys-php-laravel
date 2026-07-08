@@ -16,6 +16,7 @@
         "langsys/php-sdk": "dev-main"
     },
     "require-dev": {
+        "livewire/livewire": "^3.0",
         "orchestra/testbench": "^8.22 || ^9.0 || ^10.0",
         "phpunit/phpunit": "^10.5 || ^11.0"
     },
