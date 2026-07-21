@@ -32,7 +32,10 @@ class LangsysTranslator
         // fall back to an HTTP call for the project's base locale when unset.
         $locale ??= app()->getLocale();
 
-        $translated = $this->client->translate($phrase, LocaleDetector::normalize($locale), $category ?? '__uncategorized__');
+        // The API returns null for a phrase that exists but has no translation
+        // yet, and the SDK's empty check (`$value !== ''`) lets null through.
+        // Fall back to the phrase, same as the SDK's empty-string handling.
+        $translated = $this->client->translate($phrase, LocaleDetector::normalize($locale), $category ?? '__uncategorized__') ?? $phrase;
 
         return $params === [] ? $translated : $this->interpolator->interpolate($translated, $params, $locale);
     }
