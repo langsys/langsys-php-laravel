@@ -3,6 +3,7 @@
 namespace Langsys\Laravel;
 
 use Langsys\SDK\Client;
+use Langsys\SDK\Exception\LangsysException;
 use Langsys\SDK\Locale\LocaleDetector;
 
 /**
@@ -35,7 +36,15 @@ class LangsysTranslator
         // The API returns null for a phrase that exists but has no translation
         // yet, and the SDK's empty check (`$value !== ''`) lets null through.
         // Fall back to the phrase, same as the SDK's empty-string handling.
-        $translated = $this->client->translate($phrase, LocaleDetector::normalize($locale), $category ?? '__uncategorized__') ?? $phrase;
+        try {
+            $translated = $this->client->translate($phrase, LocaleDetector::normalize($locale), $category ?? '__uncategorized__') ?? $phrase;
+        } catch (LangsysException $e) {
+            // An unreachable or refusing API must never take the page down —
+            // serve the base-language phrase and hand the failure to the
+            // app's exception reporter instead of letting it become a 500.
+            report($e);
+            $translated = $phrase;
+        }
 
         return $params === [] ? $translated : $this->interpolator->interpolate($translated, $params, $locale);
     }

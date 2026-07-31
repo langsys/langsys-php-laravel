@@ -11,4 +11,5 @@ Initial release. `langsys/laravel-sdk` wraps the dependency-free [`langsys/php-s
 - **`FlushPendingRegistrations` terminable middleware** — sends write-key-discovered phrases to Langsys after the response; never breaks a request over registration failures.
 - **`InertiaSsrProps::share()`** — builds the `initialTranslations` / `initialTranslationsLocale` payload the JS SDKs' `LangsysApp.init()` consumes, completing the Laravel ↔ JS SSR handoff.
 - **`Langsys` facade** over the `LangsysTranslator` service, with `client()` access to the vanilla SDK.
+- **API-failure resilience** — `LangsysTranslator` catches `LangsysException` from the SDK (timeouts, 404 on an unseeded project, revoked keys) and degrades to the base-language phrase (params still interpolated), reporting the exception through the app's handler instead of letting a translation lookup 500 the page.
 - **Testbench suite** (39 tests) with a reusable `FakeClient` pattern for app-level testing, including `LivewireSupportTest` — a real Livewire component proving `@t` interpolation in the Livewire lifecycle and token discovery + flush on a component update (`livewire/livewire` is a dev dependency).
