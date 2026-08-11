@@ -59,6 +59,34 @@ class DetectLocaleTest extends TestCase
         $response->assertJson(['app_locale' => 'it-IT']);
     }
 
+    /**
+     * Accept-Language parsing is the SDK's (LocaleDetector::fromAcceptLanguage);
+     * these two cases pin the consequences at the Laravel boundary, where the
+     * middleware canonicalizes the result onto app()->getLocale().
+     *
+     * "en" carries an implicit q=1 and outranks "es-MX;q=0.9". The wrapper's
+     * own parser used to take the first locale-shaped substring and pick
+     * es-MX — a visitor who preferred English was served Spanish.
+     */
+    public function testHighestQualityLanguageWinsRegardlessOfOrder(): void
+    {
+        $response = $this->get('/probe', ['Accept-Language' => 'en,es-MX;q=0.9']);
+
+        // A bare language gains a region: the API addresses translations by
+        // xx-yy codes, so "en" alone could never match a project locale.
+        $response->assertJson(['app_locale' => 'en-EN', 'client_locale' => 'en-en']);
+    }
+
+    /** RFC 7231: q=0 means "not acceptable", so it must not be selected. */
+    public function testZeroQualityLanguageIsRejectedAndFallsThrough(): void
+    {
+        config()->set('langsys.locale.sources', ['header']);
+
+        $response = $this->get('/probe', ['Accept-Language' => 'de;q=0']);
+
+        $response->assertJson(['app_locale' => 'en']);
+    }
+
     public function testNoSourceLeavesAppLocaleAlone(): void
     {
         config()->set('langsys.locale.sources', ['query']);

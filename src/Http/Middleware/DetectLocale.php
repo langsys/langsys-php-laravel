@@ -80,17 +80,15 @@ class DetectLocale
     }
 
     /**
-     * Delegates to LocaleDetector::fromBrowser(), the SDK's single source of
-     * truth for Accept-Language parsing. Parsing it here instead meant two
-     * implementations that disagreed on q-value priority and on whether a bare
-     * language got a region — the exact defect langsys/langsys-php fixed in
-     * v1.0.0, where the result depended on whether the host had ext-intl.
+     * Delegates to the SDK, the single source of truth for Accept-Language
+     * parsing. Parsing it here instead meant two implementations that
+     * disagreed on q-value priority and on whether a bare language got a
+     * region — the exact defect langsys/langsys-php fixed in v1.0.0, where the
+     * result depended on whether the host had ext-intl.
      *
-     * fromBrowser() reads $_SERVER rather than taking an argument, so bridge
-     * Laravel's request header across and restore what was there. Laravel
-     * populates $_SERVER on real requests but not on test-kernel ones, and a
-     * bare superglobal read would also miss a header rewritten by earlier
-     * middleware.
+     * Takes Laravel's request header rather than reading $_SERVER, so a header
+     * rewritten by earlier middleware is honoured and test-kernel requests
+     * (which don't populate the superglobal) behave like real ones.
      */
     private function _fromAcceptLanguage(?string $header): ?string
     {
@@ -98,18 +96,7 @@ class DetectLocale
             return null;
         }
 
-        $previous = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? null;
-        $_SERVER['HTTP_ACCEPT_LANGUAGE'] = $header;
-
-        try {
-            return LocaleDetector::fromBrowser();
-        } finally {
-            if ($previous === null) {
-                unset($_SERVER['HTTP_ACCEPT_LANGUAGE']);
-            } else {
-                $_SERVER['HTTP_ACCEPT_LANGUAGE'] = $previous;
-            }
-        }
+        return LocaleDetector::fromAcceptLanguage($header);
     }
 
     private function _isSupported(string $locale): bool

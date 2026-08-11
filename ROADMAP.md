@@ -60,6 +60,13 @@ Design considerations to resolve when building it:
 - **Config.** Add a `translate_response` block (enabled, only-these-paths,
   except-these-paths, cache).
 
+- **Requires `langsys/langsys-php` ^1.0.1 specifically.** In v1.0.0
+  `translatePage()` never interpolated the `<head>`, so `<title>`, meta
+  description and `og:*`/`twitter:*` shipped raw `{name}` to the browser while
+  the body resolved correctly. Fixed in v1.0.1 — but it means any prototype of
+  this middleware built against v1.0.0 would have looked correct in-page while
+  silently corrupting social/SEO metadata.
+
 Status: **not started.** Everything needed on the PHP-SDK side already exists;
 this is purely wrapper work.
 
@@ -75,15 +82,15 @@ this is purely wrapper work.
   literal in Blade). Interpolation now lives in `langsys/langsys-php` and matches
   the canonical `{name}` form, so Laravel output stays consistent with the JS SDKs
   by construction rather than by our keeping a port in sync.
-- **Inline-markup tokenization is in flight upstream.** `langsys-php` has an
-  untracked `src/Html/MarkupTokenizer.php` encoding inline markup as
-  `{m<i>o}`/`{m<i>c}` tokens, wire-format-identical to the JS SDK's `<Phrase>`
-  component, so `<p>Based on {n} <strong>reviews</strong></p>` registers as ONE
-  phrase instead of splitting the count away from the noun it inflects. This
-  lands in `translatePage()` territory — i.e. directly under the
-  `TranslateResponse` middleware below. Asked upstream for timing and whether
-  `translatePage()`'s signature moves again; **don't start that middleware until
-  they answer**, or it will be built against a moving target.
+- **Inline-markup tokenization lands upstream in v1.1.** `MarkupTokenizer`
+  encodes inline markup as `{m<i>o}`/`{m<i>c}` tokens, wire-format-identical to
+  the JS SDK's `<Phrase>` component, so a subtree marked `data-langsys-phrase`
+  registers as ONE phrase instead of splitting the count away from the noun it
+  inflects. Upstream has confirmed **`translatePage($html, $category,
+  $selectorCategories, $params)` does not change again** — it's driven by an
+  HTML attribute, not a new argument — so the `TranslateResponse` middleware
+  below is safe to build against the current signature; extraction just gets
+  better underneath. They'll notify before it lands.
 
 ## Closed (v1.0.0 migration)
 

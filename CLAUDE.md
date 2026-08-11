@@ -21,7 +21,9 @@ vendor/bin/phpunit --filter testFallsBackToThePhraseWhenTheClientReturnsNull
 
 There is no linter or static-analysis config in this repo.
 
-`ext-intl` is a hard requirement (upstream v1.0.0). Without it, `composer install` refuses, and installing anyway via `--ignore-platform-req=ext-intl` makes `Client` construction throw an `ErrorException` under Laravel — upstream's `trigger_error` warning is converted by `HandleExceptions`. That is an upstream issue, not a wrapper bug; do not "fix" it by muting Laravel's error handler.
+`ext-intl` is a hard requirement (upstream v1.0.0), so `composer install` refuses without it. On Homebrew PHP 8.5 (built `--disable-intl`) neither `pecl install intl` nor the formula provides it — build `ext/intl` from the matching PHP source with `PKG_CONFIG_PATH` pointing at `icu4c@78`.
+
+**Never mute Laravel's error handler to silence SDK warnings.** Upstream's runtime-requirement warning used `trigger_error`, which `HandleExceptions` escalated into a thrown `ErrorException`; the fix belonged upstream (v1.0.1 switched to `error_log()`), not in a wrapper-side suppression that would swallow unrelated warnings. If SDK behavior changes meaning under Laravel again, report it upstream — that class of bug is invisible from inside `langsys-php`.
 
 ## Architecture
 

@@ -96,7 +96,7 @@ Interpolation itself lives in `langsys/langsys-php`, so Blade, plain PHP, and th
 
 ### Locale detection
 
-`DetectLocale` tries the configured sources in order (`query`, `cookie`, `session`, `header` by default), canonicalizes the winner to BCP 47, and sets it on both the Laravel app and the Langsys client. `Accept-Language` parsing is delegated to the SDK's `LocaleDetector::fromBrowser()`, so it honours `q`-value priority (`en,es-MX;q=0.9` resolves to `en`) and fills a missing region (`en` → `en-EN`), since the Langsys API addresses translations by `xx-yy` codes. An explicit `?locale=es-ES` choice persists via cookie (or session — see `config/langsys.php`). The locale cookie is exempted from cookie encryption so client-side JS can share the preference.
+`DetectLocale` tries the configured sources in order (`query`, `cookie`, `session`, `header` by default), canonicalizes the winner to BCP 47, and sets it on both the Laravel app and the Langsys client. `Accept-Language` parsing is delegated to the SDK's `LocaleDetector::fromAcceptLanguage()`, so it honours `q`-value priority (`en,es-MX;q=0.9` resolves to `en`), rejects `q=0` as "not acceptable" per RFC 7231, and fills a missing region (`en` → `en-EN`), since the Langsys API addresses translations by `xx-yy` codes. An explicit `?locale=es-ES` choice persists via cookie (or session — see `config/langsys.php`). The locale cookie is exempted from cookie encryption so client-side JS can share the preference.
 
 ### Token discovery & flushing
 
