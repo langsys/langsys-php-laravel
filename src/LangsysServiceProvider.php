@@ -31,7 +31,6 @@ class LangsysServiceProvider extends ServiceProvider
             ]);
         });
 
-        $this->app->singleton(Interpolator::class);
         $this->app->singleton(LangsysTranslator::class);
     }
 

@@ -72,8 +72,25 @@ this is purely wrapper work.
 
 - `%name%` markup placeholders (base JS SDK `langsys-js-typescript` ^0.4.1) are a
   JS-framework-compiler concern and **do not apply to Blade** (single `{name}` is
-  literal in Blade). Our `Interpolator` matches the canonical `{name}` form, so
-  Laravel output stays consistent with the JS SDKs. The one latent upstream gap:
-  `langsys/php-sdk`'s `translatePage()` has no `%name%` normalization equivalent —
-  a `langsys-php` concern, relevant only if the `TranslateResponse` middleware
-  above is built and someone authors `%name%` in server-rendered markup.
+  literal in Blade). Interpolation now lives in `langsys/langsys-php` and matches
+  the canonical `{name}` form, so Laravel output stays consistent with the JS SDKs
+  by construction rather than by our keeping a port in sync.
+- **Inline-markup tokenization is in flight upstream.** `langsys-php` has an
+  untracked `src/Html/MarkupTokenizer.php` encoding inline markup as
+  `{m<i>o}`/`{m<i>c}` tokens, wire-format-identical to the JS SDK's `<Phrase>`
+  component, so `<p>Based on {n} <strong>reviews</strong></p>` registers as ONE
+  phrase instead of splitting the count away from the noun it inflects. This
+  lands in `translatePage()` territory — i.e. directly under the
+  `TranslateResponse` middleware below. Asked upstream for timing and whether
+  `translatePage()`'s signature moves again; **don't start that middleware until
+  they answer**, or it will be built against a moving target.
+
+## Closed (v1.0.0 migration)
+
+- ~~Our `Interpolator` is a hand-port of the JS `interpolate()`.~~ Deleted.
+  Upstream v1.0.0 ships its own, verified against the JS SDK's output; we pass
+  `$params` through instead. This also fixed catalog pollution we couldn't:
+  registration queues the raw placeholder phrase.
+- ~~`DetectLocale` parses `Accept-Language` itself.~~ Delegated to
+  `LocaleDetector::fromBrowser()`, which fixed a q-value/ext-intl inconsistency
+  our copy had reproduced.

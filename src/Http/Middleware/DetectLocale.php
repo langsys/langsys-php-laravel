@@ -79,26 +79,37 @@ class DetectLocale
         };
     }
 
+    /**
+     * Delegates to LocaleDetector::fromBrowser(), the SDK's single source of
+     * truth for Accept-Language parsing. Parsing it here instead meant two
+     * implementations that disagreed on q-value priority and on whether a bare
+     * language got a region — the exact defect langsys/langsys-php fixed in
+     * v1.0.0, where the result depended on whether the host had ext-intl.
+     *
+     * fromBrowser() reads $_SERVER rather than taking an argument, so bridge
+     * Laravel's request header across and restore what was there. Laravel
+     * populates $_SERVER on real requests but not on test-kernel ones, and a
+     * bare superglobal read would also miss a header rewritten by earlier
+     * middleware.
+     */
     private function _fromAcceptLanguage(?string $header): ?string
     {
         if (!$header) {
             return null;
         }
 
-        if (function_exists('locale_accept_from_http')) {
-            $locale = locale_accept_from_http($header);
-            if ($locale) {
-                return $locale;
+        $previous = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? null;
+        $_SERVER['HTTP_ACCEPT_LANGUAGE'] = $header;
+
+        try {
+            return LocaleDetector::fromBrowser();
+        } finally {
+            if ($previous === null) {
+                unset($_SERVER['HTTP_ACCEPT_LANGUAGE']);
+            } else {
+                $_SERVER['HTTP_ACCEPT_LANGUAGE'] = $previous;
             }
         }
-
-        preg_match('/^\s*([a-zA-Z]{2,3})(?:[-_]([a-zA-Z]{2}))?/', $header, $matches);
-
-        if (!isset($matches[1])) {
-            return null;
-        }
-
-        return isset($matches[2]) ? "$matches[1]-$matches[2]" : $matches[1];
     }
 
     private function _isSupported(string $locale): bool

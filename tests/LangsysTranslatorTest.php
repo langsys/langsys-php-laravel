@@ -2,7 +2,6 @@
 
 namespace Langsys\Laravel\Tests;
 
-use Langsys\Laravel\Interpolator;
 use Langsys\Laravel\LangsysTranslator;
 use Langsys\Laravel\Tests\Fakes\FakeClient;
 use Langsys\SDK\Exception\ApiException;
@@ -18,7 +17,7 @@ class LangsysTranslatorTest extends TestCase
     private function clientReturningNull(): FakeClient
     {
         return new class extends FakeClient {
-            public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null)
+            public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null, array $params = [])
             {
                 return null;
             }
@@ -27,14 +26,14 @@ class LangsysTranslatorTest extends TestCase
 
     public function testFallsBackToThePhraseWhenTheClientReturnsNull(): void
     {
-        $translator = new LangsysTranslator($this->clientReturningNull(), new Interpolator());
+        $translator = new LangsysTranslator($this->clientReturningNull());
 
         $this->assertSame('Welcome', $translator->translate('Welcome', null, [], 'es-ES'));
     }
 
     public function testInterpolatesTheFallbackWhenTheClientReturnsNull(): void
     {
-        $translator = new LangsysTranslator($this->clientReturningNull(), new Interpolator());
+        $translator = new LangsysTranslator($this->clientReturningNull());
 
         $this->assertSame(
             'Welcome Sarah',
@@ -51,7 +50,7 @@ class LangsysTranslatorTest extends TestCase
     private function clientThrowing(): FakeClient
     {
         return new class extends FakeClient {
-            public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null)
+            public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null, array $params = [])
             {
                 throw new ApiException('Invalid request', 404);
             }
@@ -60,18 +59,49 @@ class LangsysTranslatorTest extends TestCase
 
     public function testFallsBackToThePhraseWhenTheApiIsUnavailable(): void
     {
-        $translator = new LangsysTranslator($this->clientThrowing(), new Interpolator());
+        $translator = new LangsysTranslator($this->clientThrowing());
 
         $this->assertSame('Welcome', $translator->translate('Welcome', null, [], 'es-ES'));
     }
 
     public function testInterpolatesTheFallbackWhenTheApiIsUnavailable(): void
     {
-        $translator = new LangsysTranslator($this->clientThrowing(), new Interpolator());
+        $translator = new LangsysTranslator($this->clientThrowing());
 
         $this->assertSame(
             'Welcome Sarah',
             $translator->translate('Welcome {name}', 'Home', ['name' => 'Sarah'], 'es-ES')
+        );
+    }
+
+    /**
+     * Params must reach the SDK rather than being applied to the returned
+     * string afterwards: the SDK queues the raw placeholder-bearing phrase for
+     * registration and interpolates only what it hands back. Applying params
+     * wrapper-side would still render correctly here, so assert on what the
+     * SDK actually received.
+     */
+    public function testPassesParamsThroughToTheSdkSoTheRawPhraseIsRegistered(): void
+    {
+        $client = new class extends FakeClient {
+            public array $receivedParams = [];
+
+            public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null, array $params = [])
+            {
+                $this->receivedParams = $params;
+
+                return parent::translate($phrase, $locale, $category, $contentBlockId, $params);
+            }
+        };
+
+        $translator = new LangsysTranslator($client);
+        $translator->translate('Welcome {name}', 'Home', ['name' => 'Sarah'], 'es-ES');
+
+        $this->assertSame(['name' => 'Sarah'], $client->receivedParams);
+        $this->assertSame(
+            [['phrase' => 'Welcome {name}', 'category' => 'Home']],
+            $client->queuedPhrases,
+            'The catalog must receive the placeholder-bearing phrase, not the interpolated string.'
         );
     }
 }

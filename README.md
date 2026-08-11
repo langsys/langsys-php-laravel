@@ -7,14 +7,14 @@ Integrate the Langsys Translation Manager into your Laravel application — Blad
 ## Requirements
 
 - **PHP 8.1+**, **Laravel 10, 11, or 12**
-- `ext-intl` recommended (locale-aware ICU pluralization and number/date formatting)
+- **`ext-intl`** (required — ICU plural rules and locale-aware number/date formatting). Note that the official `php:8.x-fpm` Docker images do not bundle it; add `docker-php-ext-install intl`.
 
 ## How it's layered
 
-`langsys/laravel-sdk` is a Laravel wrapper over the dependency-free [`langsys/php-sdk`](https://github.com/langsys/langsys-php) — which owns the HTTP client, phrase lookup, token discovery/queueing, and catalog caching. This package adds only the Laravel-native concerns:
+`langsys/langsys-php-laravel` is a Laravel wrapper over the dependency-free [`langsys/langsys-php`](https://github.com/langsys/langsys-php) — which owns the HTTP client, phrase lookup, **placeholder interpolation**, token discovery/queueing, and catalog caching. This package adds only the Laravel-native concerns:
 
 - A **service provider** that builds the SDK `Client` from `config/langsys.php` and routes catalog caching through **Laravel's cache** (any store — redis, memcached, file, array)
-- A **`t()` helper and `@t` Blade directive** with `{name}` interpolation and ICU pluralization — the same phrase syntax as the Langsys JS SDKs, so one catalog serves your whole stack
+- A **`t()` helper and `@t` Blade directive** exposing the SDK's `{name}` interpolation and ICU pluralization to Blade — the same phrase syntax as the Langsys JS SDKs, so one catalog serves your whole stack
 - A **`DetectLocale` middleware** resolving the request locale (query → cookie → session → `Accept-Language`)
 - A **`FlushPendingRegistrations` terminable middleware** (plus an Octane listener) that sends newly discovered phrases to Langsys *after* the response
 - An **`InertiaSsrProps` helper** that seeds the JS SDKs' `initialTranslations` for SSR handoff
@@ -22,7 +22,7 @@ Integrate the Langsys Translation Manager into your Laravel application — Blad
 ## Install
 
 ```bash
-composer require langsys/laravel-sdk
+composer require langsys/langsys-php-laravel
 php artisan vendor:publish --tag=langsys-config
 ```
 
@@ -75,13 +75,17 @@ Output through `@t` is HTML-escaped like `{{ }}`.
 
 #### Interpolation & pluralization
 
-`{name}` placeholders use the **same syntax as the JS SDKs**, so the same phrase translates once and renders everywhere. Numbers and `DateTimeInterface` values are CLDR-formatted for the target locale (pass strings to opt out); ICU MessageFormat pluralization works when `ext-intl` is present:
+`{name}` placeholders use the **same syntax as the JS SDKs**, so the same phrase translates once and renders everywhere. Numbers and `DateTimeInterface` values are CLDR-formatted for the target locale (pass strings to opt out), and ICU MessageFormat pluralization gives correct categories per language:
 
 ```php
 t('{count, plural, one {# item} other {# items}}', 'Cart', ['count' => $count]);
 ```
 
 Unknown placeholders are left visible rather than rendering empty.
+
+**Always pass values as `$params` — never build the string first.** `t(sprintf('Hello, %s!', $name))` registers a brand-new catalog phrase for every distinct runtime value, polluting the catalog that every Langsys SDK shares. Passing `$params` keeps one entry (`Hello, {name}!`) serving every value: the raw placeholder-bearing phrase is what gets registered, and only what you receive is interpolated.
+
+Interpolation itself lives in `langsys/langsys-php`, so Blade, plain PHP, and the JS SDKs all render a shared phrase identically.
 
 #### Categorization disambiguates context
 
@@ -92,7 +96,7 @@ Unknown placeholders are left visible rather than rendering empty.
 
 ### Locale detection
 
-`DetectLocale` tries the configured sources in order (`query`, `cookie`, `session`, `header` by default), canonicalizes the winner to BCP 47, and sets it on both the Laravel app and the Langsys client. An explicit `?locale=es-ES` choice persists via cookie (or session — see `config/langsys.php`). The locale cookie is exempted from cookie encryption so client-side JS can share the preference.
+`DetectLocale` tries the configured sources in order (`query`, `cookie`, `session`, `header` by default), canonicalizes the winner to BCP 47, and sets it on both the Laravel app and the Langsys client. `Accept-Language` parsing is delegated to the SDK's `LocaleDetector::fromBrowser()`, so it honours `q`-value priority (`en,es-MX;q=0.9` resolves to `en`) and fills a missing region (`en` → `en-EN`), since the Langsys API addresses translations by `xx-yy` codes. An explicit `?locale=es-ES` choice persists via cookie (or session — see `config/langsys.php`). The locale cookie is exempted from cookie encryption so client-side JS can share the preference.
 
 ### Token discovery & flushing
 
@@ -146,7 +150,7 @@ LangsysApp.init({
 use Langsys\Laravel\Facades\Langsys;
 
 Langsys::translate('Save', 'UI');
-Langsys::client()->getTranslations('es-es');   // vanilla langsys/php-sdk Client
+Langsys::client()->getTranslations('es-es');   // vanilla langsys/langsys-php Client
 Langsys::client()->translatePage($html);       // full-page HTML translation
 ```
 

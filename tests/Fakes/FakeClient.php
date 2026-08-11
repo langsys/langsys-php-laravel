@@ -48,23 +48,31 @@ class FakeClient extends Client
         return $this->seededTranslations[LocaleDetector::normalize($locale)] ?? [];
     }
 
-    public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null)
+    /**
+     * Mirrors the real Client's contract, including the v1.0.0 $params
+     * argument: registration queues the RAW placeholder-bearing phrase, and
+     * only the returned string is interpolated — so one catalog entry serves
+     * every runtime value. Interpolation itself runs through the inherited
+     * SDK interpolator rather than a hand-rolled one, so this fake cannot
+     * drift from the behavior it stands in for.
+     */
+    public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null, array $params = [])
     {
         $locale = $locale !== null ? LocaleDetector::normalize($locale) : $this->getLocale();
 
         if ($locale === null) {
-            return $phrase;
+            return $this->getInterpolator()->interpolate($phrase, $params, null);
         }
 
         $translation = $this->seededTranslations[$locale][$category][$phrase] ?? null;
 
         if ($translation !== null && $translation !== '') {
-            return $translation;
+            return $this->getInterpolator()->interpolate($translation, $params, $locale);
         }
 
         $this->queuedPhrases[] = ['phrase' => $phrase, 'category' => $category];
 
-        return $phrase;
+        return $this->getInterpolator()->interpolate($phrase, $params, $locale);
     }
 
     public function hasPendingRegistrations()
