@@ -18,6 +18,16 @@ Migration onto `langsys/langsys-php` v1.0.0, plus the package rename. Nothing he
 - **`q=0` is now correctly rejected** in `Accept-Language` (RFC 7231: "not acceptable"). Previously `de;q=0` selected German; it now falls through to the next source. Malformed (`q=abc`) and out-of-range (`q=1.5`) values are discarded rather than being promoted to `q=1`. Covered by `DetectLocaleTest`.
 - **The SDK's ICU calls could throw `IntlException`** (`@` does not suppress exceptions), which mattered here because `Client::getInterpolator()` is used precisely on the degraded paths that promise never to fail. Guarded upstream.
 
+### Changed (adopting `langsys/langsys-php` v1.1.0)
+
+- **Pinned `^1.1.0`.** No API changes were required — `translatePage()`'s signature is stable and nothing this package calls moved. Two upstream fixes in that release land on code paths the wrapper uses: an ICU value that itself looked like ICU could recurse until memory was exhausted on the no-intl path (reachable through `Client::getInterpolator()`, which this package calls precisely on its degraded paths), and a pre-release `data-langsys-phrase` bug that encoded inline `<script>`/`<style>` bodies into registered phrases.
+- **The second ICU defect reported from here is fixed upstream.** Without `ext-intl`, v1.0.1 emitted raw MessageFormat source into the page (`{n, plural, one {# item} other {# items}}`) rather than degrading. v1.1.0 renders a readable sentence: exact `=N` branch, then `one` for a value of 1, then `other`, with `#` substituted. Re-verified here under `php -n` — English now resolves correctly (`1 item` / `5 items`), and Russian degrades to the `other` branch (`3 товаров` rather than CLDR-correct `товара`), which is prose instead of markup.
+
+### Not applicable to this package
+
+- Upstream's known `custom_id` limitation — content-block ids agree with the JS SDKs for ASCII only, because JS `md5` hashes UTF-16 code units where PHP hashes UTF-8 bytes — **does not reach this wrapper.** It never calls `translateContentBlock()`, always passes `$contentBlockId = null`, and `InertiaSsrProps` ships the `getTranslations()` category → phrase → translation map rather than content blocks. Revisit if the deferred `TranslateResponse` middleware ever introduces content blocks.
+- Upstream's no-`ext-intl` ICU apostrophe-quoting limitation (a translation using `'{'` as a literal emits the pattern verbatim) is unreachable here, since `ext-intl` is a hard requirement.
+
 ### Verified
 
 - **Differential test against the deleted `Interpolator`** — the removed hand-port and upstream's implementation were compared across 26 cases (unknown keys, nulls, string opt-out of number formatting, bool rendering, ICU plural/select including Russian's `few`, malformed ICU fallback, locale-specific number and date formatting). **Zero disagreements**, confirming the deletion changed no behavior.

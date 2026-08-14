@@ -60,15 +60,30 @@ Design considerations to resolve when building it:
 - **Config.** Add a `translate_response` block (enabled, only-these-paths,
   except-these-paths, cache).
 
-- **Requires `langsys/langsys-php` ^1.0.1 specifically.** In v1.0.0
-  `translatePage()` never interpolated the `<head>`, so `<title>`, meta
+- **Inline `<script>` / `<style>` are the sharp edge here.** A response
+  middleware runs over *whole rendered responses*, which is exactly where
+  bootstrapped JSON state, CSRF tokens and inline JS live. Upstream found and
+  fixed (pre-release, never shipped) a `data-langsys-phrase` bug that encoded
+  script bodies into the registered phrase — meaning a catalog entry could
+  rewrite inline JS back into the page. v1.1.0 preserves opaque subtrees and
+  `translate="no"` verbatim. **Verify that directly against a real Laravel
+  response before enabling this middleware anywhere**, because the wrapper is
+  what would feed it whole pages; a unit test over a fragment won't exercise it.
+- **`data-langsys-phrase` is a `translatePage()`-only feature.** A marked run
+  still splits inside a content block. That asymmetry should drive scoping: the
+  keep-together primitive is an argument for the response-middleware path over
+  content blocks for markup-bearing copy.
+- **Requires `langsys/langsys-php` ^1.0.1 at minimum, ^1.1.0 in practice.** In
+  v1.0.0 `translatePage()` never interpolated the `<head>`, so `<title>`, meta
   description and `og:*`/`twitter:*` shipped raw `{name}` to the browser while
   the body resolved correctly. Fixed in v1.0.1 — but it means any prototype of
   this middleware built against v1.0.0 would have looked correct in-page while
   silently corrupting social/SEO metadata.
 
-Status: **not started.** Everything needed on the PHP-SDK side already exists;
-this is purely wrapper work.
+Status: **not started, but unblocked.** Everything needed on the PHP-SDK side
+exists as of v1.1.0, and upstream has confirmed `translatePage($html, $category,
+$selectorCategories, $params)` is stable — the v1.1 markup work changes
+extraction underneath, not the signature. This is purely wrapper work.
 
 ## Closed
 
