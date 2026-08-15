@@ -1,7 +1,7 @@
 # Roadmap / known gaps
 
-Running list of deferred work and design decisions for `langsys/laravel-sdk`, so
-the context isn't lost between sessions.
+Running list of deferred work and design decisions for
+`langsys/langsys-php-laravel`, so the context isn't lost between sessions.
 
 ## Coverage model: explicit tagging vs. automatic translation
 
