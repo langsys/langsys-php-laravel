@@ -48,12 +48,26 @@ Design considerations to resolve when building it:
   route/group middleware, not global-by-default.
 - **Respect `translate="no"`** and the SDK's translatable-attributes config
   (already supported by `translatePage`).
-- **Double-translation risk.** If both `@t` tagging and the response middleware
-  run, an already-`@t`-translated node gets re-walked by `translatePage`, looked
-  up as a phrase (miss), and registered as garbage. Decide the model: either
-  the middleware is used *instead of* `@t` (automatic mode), or it must skip
-  nodes already resolved by `@t` (e.g. a marker attribute). Cleanest is
-  "pick one mode per project."
+- **Double-translation — RESOLVED: one mode per project.** Automatic *or*
+  tagged, never both. The hazard is confirmed upstream by repro: a node `@t`
+  already translated gets re-walked by `translatePage()`, looked up as a source
+  phrase, missed, and **registered** — so a Spanish `"Guardar"` enters the
+  catalog every Langsys SDK shares, as if it were a source phrase.
+  `<p>Save</p><p>Guardar</p>` registers `["T", "Save", "Guardar"]`.
+
+  A marker attribute was considered and rejected. `@t` emits escaped inline
+  text and is used **inside attribute values** (`<input placeholder="@t('Your
+  name', 'Forms')">`), where there is no element to mark; `translate="no"` on
+  the `<input>` would exclude attributes we *do* want translated. A skip
+  mechanism that covers text nodes but silently misses attribute positions is
+  worse than none — it works until someone translates a placeholder.
+- **`translate="no"` is the per-subtree escape hatch.** Already honoured by
+  `HtmlParser`, `PageTranslator` and `MarkupTokenizer`, and already the
+  cross-SDK answer — the JS tokenizer checks it on the line immediately above
+  its own marker check. Standards-based HTML, no new vocabulary to keep in sync.
+  Upstream repro: `<p translate="no">Guardar</p>` is not extracted, not
+  registered, not rendered over. **Do not invent a wrapper-side skip marker** —
+  the capability exists under a name the platform already gave us.
 - **Performance.** Parsing every HTML response has a cost; consider caching the
   translated output keyed by (route, locale, content hash), and only walking
   when translations for the locale exist.
@@ -80,9 +94,18 @@ Design considerations to resolve when building it:
   this middleware built against v1.0.0 would have looked correct in-page while
   silently corrupting social/SEO metadata.
 
-Status: **not started, but unblocked.** Everything needed on the PHP-SDK side
-exists as of v1.1.0, and upstream has confirmed `translatePage($html, $category,
-$selectorCategories, $params)` is stable — the v1.1 markup work changes
+**The boundary that keeps this a wrapper.** The middleware may decide **whether**
+to call `translatePage()` and **what to hand it**. It must never decide **what
+inside the HTML** gets translated — which elements are walked, which attributes
+are translatable, what `translate="no"` means, how markup is tokenized. Those
+are upstream's, permanently. The moment wrapper code inspects the HTML itself it
+has stopped being a wrapper; that is how the duplicate `Interpolator` happened.
+Caching translated output (route + locale + content hash) is legitimately ours,
+and is the one piece with room to grow teeth — keep it dumb.
+
+Status: **not started, unblocked, design settled.** Everything needed on the
+PHP-SDK side exists as of v1.1.0, and upstream has confirmed `translatePage($html,
+$category, $selectorCategories, $params)` is stable — the v1.1 markup work changes
 extraction underneath, not the signature. This is purely wrapper work.
 
 ## Closed
@@ -97,6 +120,22 @@ extraction underneath, not the signature. This is purely wrapper work.
   literal in Blade). Interpolation now lives in `langsys/langsys-php` and matches
   the canonical `{name}` form, so Laravel output stays consistent with the JS SDKs
   by construction rather than by our keeping a port in sync.
+- **Open cross-SDK interop gap: the SSR-handoff marker mismatch.** PHP's
+  author-facing `data-langsys-phrase` **survives into `translatePage()` output**
+  (verified upstream), while the JS tokenizer skips only its own internal
+  `data-ls-phrase` (`PHRASE_MARKER_ATTR`, `langsys-js-typescript/src/phrase.ts`).
+  So a page rendered by `translatePage()` and then hydrated by a JS SDK whose
+  tokenizer walks the live DOM has the JS side recurse into a subtree PHP already
+  tokenized. The two attributes were allowed to diverge because one is
+  author-facing and the other internal — true until SSR puts both in **one DOM
+  walked by both implementations**. Upstream is raising it with the base-SDK
+  agent; likely fix is the JS tokenizer also skipping `data-langsys-phrase` (one
+  line, no break) rather than renaming a published PHP attribute. **Scope
+  honestly: reachable, not observed** — no deployment is confirmed doing PHP
+  `translatePage()` + JS-tokenizer hydration over the same markup, and a JS app
+  rendering its own components from the catalog never sees PHP's DOM. Cheap and
+  silent, not on fire. Recheck before building `TranslateResponse`, since that
+  middleware is what would make the combination routine.
 - **Inline-markup tokenization lands upstream in v1.1.** `MarkupTokenizer`
   encodes inline markup as `{m<i>o}`/`{m<i>c}` tokens, wire-format-identical to
   the JS SDK's `<Phrase>` component, so a subtree marked `data-langsys-phrase`

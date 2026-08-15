@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `langsys/langsys-php-laravel` — a **Laravel wrapper** over the dependency-free [`langsys/langsys-php`](https://github.com/langsys/langsys-php) (sibling checkout at `../langsys-php`, pinned `^1.0`). The vanilla SDK owns the HTTP client, phrase lookup, **interpolation**, token discovery/queueing, and catalog caching. This package adds **only** Laravel-native concerns. When a behavior belongs to lookup/HTTP/interpolation/queueing, the fix goes upstream in `langsys-php`, not here.
 
-**Do not reimplement upstream behavior in this repo.** The wrapper previously carried its own `Interpolator` and its own `Accept-Language` parser; both drifted from — and in the parser's case reproduced a bug already fixed in — the upstream originals. Delegate and pass through.
+**Do not reimplement upstream behavior in this repo.** The wrapper previously carried its own `Interpolator` and its own `Accept-Language` parser; both drifted from — and in the parser's case reproduced a bug already fixed in — the upstream originals. Delegate and pass through. Before inventing a mechanism, check whether the SDK (or plain HTML) already has one: the skip marker proposed for `TranslateResponse` turned out to be `translate="no"`, which both SDKs already honour.
 
 Sibling SDKs sharing the same phrase catalog and `t()` semantics live alongside this repo: `../langsys-js-typescript` (the base JS SDK this package's `Interpolator` is ported from), `../langsys-js-vue`, `../langsys-js-react`, `../langsys-js-svelte`.
 
