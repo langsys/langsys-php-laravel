@@ -9,6 +9,7 @@ use Illuminate\Support\ServiceProvider;
 use Langsys\Laravel\Cache\LaravelCacheAdapter;
 use Langsys\Laravel\Http\Middleware\DetectLocale;
 use Langsys\Laravel\Http\Middleware\FlushPendingRegistrations;
+use Langsys\Laravel\Http\Middleware\TranslateResponse;
 use Langsys\SDK\Client;
 use Langsys\SDK\Exception\LangsysException;
 
@@ -55,6 +56,10 @@ class LangsysServiceProvider extends ServiceProvider
         $router = $this->app['router'];
         $router->aliasMiddleware('langsys.locale', DetectLocale::class);
         $router->aliasMiddleware('langsys.flush', FlushPendingRegistrations::class);
+
+        // Deliberately not added to any group: automatic response translation
+        // is opt-in per route/group and must never coexist with @t tagging.
+        $router->aliasMiddleware('langsys.translate-page', TranslateResponse::class);
 
         // The locale cookie is a plain locale code, not a secret. Keeping it
         // unencrypted lets DetectLocale read it back and lets client-side JS

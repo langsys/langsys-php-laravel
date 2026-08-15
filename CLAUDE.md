@@ -48,9 +48,15 @@ The call path for every translation is: **`t()` / `@t` → `LangsysTranslator` �
 - **Locale defaults to `app()->getLocale()`, not `Client::getLocale()`** — the latter auto-detects from `$_SERVER` and can trigger an HTTP call for the project's base locale.
 - **`LaravelCacheAdapter::clear()` only evicts its own keys** (tracked in a `__key_index` entry), never the whole Laravel store.
 
-### Coverage model
+### Coverage model — two modes, never both
 
-Only strings explicitly wrapped in `t()` / `@t` are translated — there is no pass over rendered HTML. This is deliberate; see `ROADMAP.md` for the known Alpine dynamic-attribute gap and the deferred opt-in `TranslateResponse` middleware design (including the double-translation hazard if it ever ships alongside `@t` tagging). Read `ROADMAP.md` before proposing automatic/whole-page translation.
+**Tagged mode (default):** only strings wrapped in `t()` / `@t` are translated. Coverage equals your tagging.
+
+**Automatic mode (opt-in):** the `langsys.translate-page` middleware (`TranslateResponse`) runs `translatePage()` over the rendered HTML response. Covers everything, including the Alpine dynamic-attribute text `@t` structurally cannot reach.
+
+**A project picks one.** Running both makes the middleware re-walk `@t`-translated nodes, look the *translated* string up as a source phrase, miss, and register it — poisoning the catalog every Langsys SDK shares with translated strings posing as source text. `translate="no"` is the per-subtree escape hatch; do not invent a wrapper-side skip marker.
+
+`TranslateResponse` decides only **whether** to call `translatePage()` and **what to hand it** — never what inside the HTML gets translated. Two things it does not inherit from tagged mode: page registration bypasses the flush middleware (inline HTTP, so write keys are dev-only), and PHP SSR + JS hydration requires a JS SDK whose tokenizer knows `data-langsys-phrase`. Both are in `ROADMAP.md`; read it before changing this middleware.
 
 ## Conventions
 

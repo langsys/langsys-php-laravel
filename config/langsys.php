@@ -58,6 +58,45 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Automatic response translation (TranslateResponse middleware)
+    |--------------------------------------------------------------------------
+    |
+    | Opt-in. Applies the `langsys.translate-page` middleware to translate every
+    | text node and translatable attribute of a rendered HTML response, with no
+    | `@t` tagging. This is the only way to cover text Alpine injects from a JS
+    | expression (`x-text="'Save changes'"`), which never becomes a DOM node you
+    | can wrap.
+    |
+    | PICK ONE MODE PER PROJECT — automatic OR `@t` tagging, never both. If both
+    | run, this middleware re-walks nodes `@t` already translated, looks the
+    | TRANSLATED string up as a source phrase, misses, and registers it: a
+    | Spanish "Guardar" enters the catalog every Langsys SDK shares as though it
+    | were source text. Mark any already-resolved subtree `translate="no"`.
+    |
+    | If you server-render with this AND hydrate with a Langsys JS SDK, pair it
+    | with a JS version whose tokenizer recognises `data-langsys-phrase`; older
+    | versions re-walk server-tokenized subtrees and split phrases at tag
+    | boundaries, fragmenting the shared catalog silently.
+    |
+    | `only`/`except` take Laravel path patterns (`admin/*`); `except` wins.
+    | Caching is keyed by the source HTML, so it is useless for pages carrying a
+    | CSRF token or timestamp — hence disabled by default.
+    |
+    */
+
+    'translate_response' => [
+        'enabled'  => (bool) env('LANGSYS_TRANSLATE_RESPONSE', false),
+        'category' => env('LANGSYS_TRANSLATE_RESPONSE_CATEGORY'),
+        'only'     => [],
+        'except'   => [],
+        'cache'    => [
+            'enabled' => (bool) env('LANGSYS_TRANSLATE_RESPONSE_CACHE', false),
+            'ttl'     => (int) env('LANGSYS_TRANSLATE_RESPONSE_CACHE_TTL', 3600),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pending-registration auto flush
     |--------------------------------------------------------------------------
     |

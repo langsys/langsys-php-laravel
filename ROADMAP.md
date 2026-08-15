@@ -30,22 +30,27 @@ Wrapping with `@t` inside the JS-string attribute (`x-text="'@t(...)'"`) is
 fragile: `@t` HTML-escapes via `e()`, so a translation containing a quote or `&`
 breaks the attribute.
 
-## Proposed: `TranslateResponse` middleware (the "covers everything" deliverable)
+## SHIPPED: `TranslateResponse` middleware (the "covers everything" deliverable)
 
-The vanilla PHP SDK already ships `Client::translatePage($html)` (+ `HtmlParser`,
-`SelectorMatcher`, the translatable-attributes config) — the **server-side
-analog of the JS SDK's DOM tokenizer**. Wire it as an opt-in response middleware
-that runs over the final rendered HTML, and the "covers ALL server-rendered
-Laravel (Blade, Livewire, Alpine)" claim becomes literally true without
-hand-tagging: every text node and translatable attribute (`placeholder`,
-`alt`, `aria-label`, etc.) gets translated, and write-key token discovery runs
+`src/Http/Middleware/TranslateResponse.php`, alias `langsys.translate-page`,
+config block `translate_response`, 17 tests in `tests/TranslateResponseTest.php`.
+
+Wraps `Client::translatePage()` (+ `HtmlParser`, `SelectorMatcher`,
+`MarkupTokenizer`, the translatable-attributes config) — the **server-side
+analog of the JS SDK's DOM tokenizer** — as an opt-in response middleware over
+the final rendered HTML, so the "covers ALL server-rendered Laravel (Blade,
+Livewire, Alpine)" claim is literally true without hand-tagging: every text node
+and translatable attribute gets translated, and write-key token discovery runs
 over the whole page.
 
-Design considerations to resolve when building it:
+How the design landed:
 
-- **Opt-in, scoped.** Only translate `text/html` responses; skip JSON,
-  redirects, downloads, streamed responses. Likely a `langsys.translate-page`
-  route/group middleware, not global-by-default.
+- **Opt-in, scoped.** Only `text/html`; JSON, redirects, streamed and file
+  responses pass through. Registered as an alias only — never added to a group,
+  because automatic mode must not switch itself on for a project that tags with
+  `@t`. `only`/`except` path patterns narrow it further; `except` wins.
+  The content-type guard is what excludes Livewire and Inertia XHR round-trips
+  without the middleware knowing those libraries exist.
 - **Respect `translate="no"`** and the SDK's translatable-attributes config
   (already supported by `translatePage`).
 - **Double-translation — RESOLVED: one mode per project.** Automatic *or*
@@ -68,21 +73,47 @@ Design considerations to resolve when building it:
   Upstream repro: `<p translate="no">Guardar</p>` is not extracted, not
   registered, not rendered over. **Do not invent a wrapper-side skip marker** —
   the capability exists under a name the platform already gave us.
-- **Performance.** Parsing every HTML response has a cost; consider caching the
-  translated output keyed by (route, locale, content hash), and only walking
-  when translations for the locale exist.
-- **Config.** Add a `translate_response` block (enabled, only-these-paths,
-  except-these-paths, cache).
+- **Caching ships disabled**, keyed by `(locale, sha1(source HTML))` — never by
+  route, so a page varying by user or state can't serve another request's
+  translation. That keying also makes it useless for most Laravel pages: a CSRF
+  token or timestamp changes the hash every render. Only worth enabling for
+  genuinely static, high-traffic HTML. Keep it dumb; it is the one piece of this
+  middleware with room to grow teeth.
+- **Inline `<script>` / `<style>` — VERIFIED, `tests/TranslateResponseSafetyTest.php`.**
+  A response middleware runs over *whole rendered responses*, which is exactly
+  where bootstrapped JSON state, CSRF tokens and inline JS live. Upstream found
+  and fixed (pre-release) a `data-langsys-phrase` bug that encoded script bodies
+  into registered phrases — a catalog entry could then rewrite inline JS back
+  into the page, a stored-XSS shape. That test runs the **real** page translator
+  (only `getTranslations()`/`canWrite()` stubbed, to stay off the network) over a
+  Laravel-shaped page and asserts script and style bodies survive byte-for-byte,
+  both CSRF token copies are intact, nothing script-ish is registered, and
+  `translate="no"` is honoured — while confirming an untranslated heading *is*
+  registered, so the guard can't pass vacuously. Keep that test honest if the
+  page fixture changes.
 
-- **Inline `<script>` / `<style>` are the sharp edge here.** A response
-  middleware runs over *whole rendered responses*, which is exactly where
-  bootstrapped JSON state, CSRF tokens and inline JS live. Upstream found and
-  fixed (pre-release, never shipped) a `data-langsys-phrase` bug that encoded
-  script bodies into the registered phrase — meaning a catalog entry could
-  rewrite inline JS back into the page. v1.1.0 preserves opaque subtrees and
-  `translate="no"` verbatim. **Verify that directly against a real Laravel
-  response before enabling this middleware anywhere**, because the wrapper is
-  what would feed it whole pages; a unit test over a fragment won't exercise it.
+### Found while building: page registration bypasses the flush middleware
+
+`translatePage()` does **not** use the pending-registration queue that
+`translate()` uses. It calls `Client::canWrite()` and then
+`Client::registerPhrases()` **inline**, mid-render, both of which are HTTP:
+
+```
+PageTranslator::registerNewItemsWithCategory()
+  -> $this->client->canWrite()          // HTTP permissions check
+  -> $this->client->registerPhrases()   // HTTP POST
+```
+
+So `FlushPendingRegistrations` and the Octane listener **do not govern automatic
+mode**. On a write key, a page containing new phrases makes blocking HTTP calls
+before the response is sent — the opposite of the after-the-response guarantee
+tagged mode gives. Both calls are wrapped in silent `catch`, so a failure costs
+latency rather than correctness, and read-only keys skip it entirely.
+
+Consequence: **automatic mode with a write key is a development-only
+configuration**, more strongly than for tagged mode. Raised upstream — the ask
+is whether `translatePage()` could queue through the same pending mechanism so
+the terminable middleware drains it after the response.
 - **`data-langsys-phrase` is a `translatePage()`-only feature.** A marked run
   still splits inside a content block. That asymmetry should drive scoping: the
   keep-together primitive is an argument for the response-middleware path over

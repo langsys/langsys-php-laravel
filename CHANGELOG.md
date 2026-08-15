@@ -18,6 +18,20 @@ Migration onto `langsys/langsys-php` v1.0.0, plus the package rename. Nothing he
 - **`q=0` is now correctly rejected** in `Accept-Language` (RFC 7231: "not acceptable"). Previously `de;q=0` selected German; it now falls through to the next source. Malformed (`q=abc`) and out-of-range (`q=1.5`) values are discarded rather than being promoted to `q=1`. Covered by `DetectLocaleTest`.
 - **The SDK's ICU calls could throw `IntlException`** (`@` does not suppress exceptions), which mattered here because `Client::getInterpolator()` is used precisely on the degraded paths that promise never to fail. Guarded upstream.
 
+### Added
+
+- **`TranslateResponse` middleware** (`langsys.translate-page`) — opt-in automatic translation of rendered HTML responses via the SDK's `translatePage()`, covering every text node and translatable attribute with no `@t` tagging. This closes the one gap explicit tagging structurally cannot reach: text Alpine injects from a JS expression (`x-text="'Save changes'"`, `:aria-label="…"`) never becomes a DOM node you can wrap. Configured under `translate_response` in `config/langsys.php`.
+  - **Automatic and tagged mode must not be combined — one mode per project.** If both run, the middleware re-walks nodes `@t` already translated, looks the *translated* string up as a source phrase, misses, and registers it, so a Spanish `"Guardar"` enters the catalog every Langsys SDK shares as though it were source text. `translate="no"` marks an already-resolved subtree; no wrapper-side skip marker was invented, because that capability already exists in standards HTML and both SDKs honour it.
+  - Registered as an alias only, never added to a middleware group, so automatic mode cannot switch itself on for a project that tags with `@t`.
+  - Only `text/html` responses are touched; JSON, redirects, streamed and file responses pass through. The content-type guard is what excludes Livewire and Inertia XHR round-trips without the middleware knowing those libraries exist.
+  - Degrades like every other lookup path here: a `LangsysException` is reported and the **untranslated** page served, and a client returning an empty string never blanks a response body.
+  - Optional caching keyed by `(locale, sha1(source HTML))` — never by route, so a page varying by user can't serve another request's translation. Ships **disabled**, because a CSRF token or timestamp changes the hash every render.
+  - **Verified against the real page translator**, not the test fake (`tests/TranslateResponseSafetyTest.php`): inline `<script>`/`<style>` bodies survive byte-for-byte, both copies of a CSRF token are intact, nothing script-ish is registered to the shared catalog, and `translate="no"` is honoured. This wrapper is what feeds `translatePage()` whole rendered pages, so a fragment-level test would not have exercised the risk.
+
+### Known behaviour
+
+- **Automatic mode with a write key is development-only.** `translatePage()` does not use the pending-registration queue that `translate()` uses — it calls `canWrite()` and `registerPhrases()` inline, mid-render, both over HTTP. `FlushPendingRegistrations` and the Octane listener therefore do not govern automatic mode, and a page containing new phrases makes blocking calls before the response is sent. Failures are swallowed, so the cost is latency rather than correctness; read-only keys skip registration entirely. Raised upstream.
+
 ### Changed (adopting `langsys/langsys-php` v1.1.0)
 
 - **Pinned `^1.1.0`.** No API changes were required — `translatePage()`'s signature is stable and nothing this package calls moved. Two upstream fixes in that release land on code paths the wrapper uses: an ICU value that itself looked like ICU could recurse until memory was exhausted on the no-intl path (reachable through `Client::getInterpolator()`, which this package calls precisely on its degraded paths), and a pre-release `data-langsys-phrase` bug that encoded inline `<script>`/`<style>` bodies into registered phrases.

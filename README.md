@@ -17,6 +17,7 @@ Integrate the Langsys Translation Manager into your Laravel application — Blad
 - A **`t()` helper and `@t` Blade directive** exposing the SDK's `{name}` interpolation and ICU pluralization to Blade — the same phrase syntax as the Langsys JS SDKs, so one catalog serves your whole stack
 - A **`DetectLocale` middleware** resolving the request locale (query → cookie → session → `Accept-Language`)
 - A **`FlushPendingRegistrations` terminable middleware** (plus an Octane listener) that sends newly discovered phrases to Langsys *after* the response
+- An opt-in **`TranslateResponse` middleware** that translates whole rendered HTML responses, for projects that want coverage without hand-tagging
 - An **`InertiaSsrProps` helper** that seeds the JS SDKs' `initialTranslations` for SSR handoff
 
 ## Install
@@ -115,6 +116,39 @@ class Checkout extends Component
     }
 }
 ```
+
+### Automatic translation — the `langsys.translate-page` middleware
+
+Everything above is **tagged mode**: coverage equals your tagging. `TranslateResponse` is the **automatic mode** — it runs the SDK's page translator over the rendered HTML, translating every text node and translatable attribute (`placeholder`, `alt`, `aria-label`, …) with no `@t` at all. It's the only way to cover text Alpine injects from a JS expression, which never becomes a DOM node you can wrap:
+
+```blade
+<span x-text="'Save changes'"></span>
+<button :aria-label="open ? 'Collapse' : 'Expand'">…</button>
+```
+
+> **Pick one mode per project — never run automatic mode and `@t` together.**
+> If both run, this middleware re-walks nodes `@t` already translated, looks the *translated* string up as a source phrase, misses, and **registers it**. A Spanish `"Guardar"` then enters the catalog every Langsys SDK shares as though it were source text. Mark any already-resolved subtree `translate="no"`.
+
+It is opt-in and applies to nothing until you attach it:
+
+```php
+// routes/web.php — per route or group, never global
+Route::middleware('langsys.translate-page')->group(function () {
+    Route::get('/', HomeController::class);
+});
+```
+
+```dotenv
+LANGSYS_TRANSLATE_RESPONSE=true
+```
+
+Only `text/html` responses are touched. JSON, redirects, streamed and file responses pass through untouched — which is what keeps Livewire and Inertia XHR round-trips out automatically. Scope it further with `only` / `except` path patterns in `config/langsys.php` (`except` wins), and set a `category` to namespace everything the page registers.
+
+**Use a read-only key in production with this middleware.** Unlike `t()` / `@t` — whose newly discovered phrases are queued and flushed *after* the response — `translatePage()` registers inline, mid-render, with blocking HTTP calls. On a write key a page containing new phrases pays that cost before the response is sent. Failures are swallowed, so it costs latency rather than correctness, and read-only keys skip registration entirely.
+
+**Caching is off by default and should usually stay off.** Translated output is keyed by a hash of the source HTML, so a page carrying a CSRF token or a timestamp produces a new key every render. Enable it only for genuinely static, high-traffic HTML.
+
+> **If you server-render with this and hydrate with a Langsys JS SDK**, pair it with a JS version whose tokenizer recognises `data-langsys-phrase`. Older versions re-walk server-tokenized subtrees and split phrases at tag boundaries — `Read the <a>docs</a> now` registers as three fragments — which fragments the shared catalog silently and puts a count in a different phrase from the noun it inflects.
 
 ### Inertia SSR seeding (Vue/React/Svelte SDKs)
 

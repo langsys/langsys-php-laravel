@@ -19,6 +19,9 @@ class FakeClient extends Client
     /** @var list<array{phrase: string, category: string}> */
     public array $queuedPhrases = [];
 
+    /** @var list<array{html: string, category: ?string, locale: ?string}> */
+    public array $translatedPages = [];
+
     public int $flushCalls = 0;
 
     public function __construct()
@@ -73,6 +76,24 @@ class FakeClient extends Client
         $this->queuedPhrases[] = ['phrase' => $phrase, 'category' => $category];
 
         return $this->getInterpolator()->interpolate($phrase, $params, $locale);
+    }
+
+    /**
+     * Records the call and performs a trivially observable substitution. The
+     * real page translator walks the DOM, applies the translatable-attribute
+     * config and tokenizes markup — all upstream's, and covered by upstream's
+     * tests. What belongs here is the wrapper's decision: WHETHER we called it,
+     * and WHAT we handed it.
+     */
+    public function translatePage($html, $category = null, array $selectorCategories = [], array $params = [])
+    {
+        $this->translatedPages[] = [
+            'html'     => $html,
+            'category' => $category,
+            'locale'   => $this->getLocale(),
+        ];
+
+        return str_replace('Save', 'Guardar', $html);
     }
 
     public function hasPendingRegistrations()
