@@ -120,22 +120,44 @@ extraction underneath, not the signature. This is purely wrapper work.
   literal in Blade). Interpolation now lives in `langsys/langsys-php` and matches
   the canonical `{name}` form, so Laravel output stays consistent with the JS SDKs
   by construction rather than by our keeping a port in sync.
-- **Open cross-SDK interop gap: the SSR-handoff marker mismatch.** PHP's
-  author-facing `data-langsys-phrase` **survives into `translatePage()` output**
-  (verified upstream), while the JS tokenizer skips only its own internal
-  `data-ls-phrase` (`PHRASE_MARKER_ATTR`, `langsys-js-typescript/src/phrase.ts`).
-  So a page rendered by `translatePage()` and then hydrated by a JS SDK whose
-  tokenizer walks the live DOM has the JS side recurse into a subtree PHP already
-  tokenized. The two attributes were allowed to diverge because one is
-  author-facing and the other internal — true until SSR puts both in **one DOM
-  walked by both implementations**. Upstream is raising it with the base-SDK
-  agent; likely fix is the JS tokenizer also skipping `data-langsys-phrase` (one
-  line, no break) rather than renaming a published PHP attribute. **Scope
-  honestly: reachable, not observed** — no deployment is confirmed doing PHP
-  `translatePage()` + JS-tokenizer hydration over the same markup, and a JS app
-  rendering its own components from the catalog never sees PHP's DOM. Cheap and
-  silent, not on fire. Recheck before building `TranslateResponse`, since that
-  middleware is what would make the combination routine.
+- **SSR-handoff marker mismatch — FIXED cross-SDK, but it dictates a version
+  pairing.** PHP's author-facing `data-langsys-phrase` survives into
+  `translatePage()` output, while the JS tokenizer originally skipped only its
+  own internal `data-ls-phrase`. A page rendered by `translatePage()` and then
+  hydrated by a JS SDK had the JS side walk into a subtree PHP had already
+  tokenized.
+
+  **The damage was worse than a wasteful re-walk.** The JS tokenizer recurses
+  *per text node*, so it didn't re-register the phrase — it **split the run at
+  tag boundaries**:
+
+  ```
+  <p data-langsys-phrase>Read the <a href="/d">docs</a> now</p>
+    -> registers THREE fragments: ["Read the", "docs", "now"]
+  ```
+
+  That is exactly the fragmentation the keep-together primitive exists to
+  prevent — a count and the noun it inflects land in separate catalog entries
+  where no ICU plural can reach across them. The sentence goes in whole from PHP
+  and comes back in pieces from JS, into the same catalog.
+
+  Fixed in `langsys-js-typescript`: `PHRASE_MARKER_ATTRS = ['data-ls-phrase',
+  'data-langsys-phrase']` with a shared `isPhraseMarked()` used at both skip
+  sites (`translate.ts:222`, `content-block.ts:246`) and exported from the
+  package index — verified in the sibling checkout. Wrappers that tokenize
+  through their own templating can import it rather than re-deriving the list.
+
+  **Live constraint for `TranslateResponse`:** a Laravel app doing PHP SSR plus
+  JS hydration is the deployment shape where this arises, and it is the shape
+  this middleware is most likely to run in — the middleware would make the
+  combination routine rather than exotic. So when it ships, its docs must state
+  the version pairing: server-rendering with `translatePage()` requires a JS SDK
+  whose tokenizer recognises `data-langsys-phrase`. Older JS versions fragment
+  the catalog silently.
+
+  Why it slipped through: the two attribute names were allowed to diverge
+  because one is author-facing and the other internal — sound reasoning, right
+  up until SSR puts both in **one DOM walked by both implementations**.
 - **Inline-markup tokenization lands upstream in v1.1.** `MarkupTokenizer`
   encodes inline markup as `{m<i>o}`/`{m<i>c}` tokens, wire-format-identical to
   the JS SDK's `<Phrase>` component, so a subtree marked `data-langsys-phrase`
