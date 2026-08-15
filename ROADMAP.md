@@ -100,20 +100,36 @@ How the design landed:
 
 ```
 PageTranslator::registerNewItemsWithCategory()
-  -> $this->client->canWrite()          // HTTP permissions check
-  -> $this->client->registerPhrases()   // HTTP POST
+  -> $this->client->canWrite()          // 1. HTTP permissions check
+  -> $this->client->registerPhrases()   // 2. HTTP POST
+PageTranslator::translateDocument()
+  -> $this->client->clearCache($locale)
+  -> $this->client->getTranslations($locale)   // 3. HTTP refetch
 ```
 
 So `FlushPendingRegistrations` and the Octane listener **do not govern automatic
-mode**. On a write key, a page containing new phrases makes blocking HTTP calls
-before the response is sent — the opposite of the after-the-response guarantee
-tagged mode gives. Both calls are wrapped in silent `catch`, so a failure costs
-latency rather than correctness, and read-only keys skip it entirely.
+mode**. On a write key, a page containing new phrases makes **three** blocking
+HTTP calls before the response is sent — the opposite of the
+after-the-response guarantee tagged mode gives. All are wrapped in silent
+`catch`, so a failure costs latency rather than correctness, and read-only keys
+skip the whole path.
 
-Consequence: **automatic mode with a write key is a development-only
-configuration**, more strongly than for tagged mode. Raised upstream — the ask
-is whether `translatePage()` could queue through the same pending mechanism so
-the terminable middleware drains it after the response.
+Upstream's read (they traced it rather than recalled it): registration is inline
+*so that* the third call can apply the refetched catalog within the same
+response — but the items just registered are brand new and have no translations
+yet, so the refetch can only surface work a translator completed after some
+earlier request, which the next page load would pick up anyway. Not a
+constraint, a coupling: `translate()`'s queue came first and `translatePage()`
+was written to register directly. Content blocks don't force it either —
+`custom_id` is computed locally, so nothing needs a round-trip before the
+response finishes.
+
+Consequence for now: **automatic mode with a write key is a development-only
+configuration**, more strongly than for tagged mode. Upstream has put moving
+page registration onto the pending queue to Darryl — it's a behaviour change to
+a shipped API (a page that currently self-heals within one response would take
+two). **If it lands, delete this section and the read-only-key caveat in the
+README.**
 - **`data-langsys-phrase` is a `translatePage()`-only feature.** A marked run
   still splits inside a content block. That asymmetry should drive scoping: the
   keep-together primitive is an argument for the response-middleware path over

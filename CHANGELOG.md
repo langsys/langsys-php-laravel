@@ -30,7 +30,8 @@ Migration onto `langsys/langsys-php` v1.0.0, plus the package rename. Nothing he
 
 ### Known behaviour
 
-- **Automatic mode with a write key is development-only.** `translatePage()` does not use the pending-registration queue that `translate()` uses — it calls `canWrite()` and `registerPhrases()` inline, mid-render, both over HTTP. `FlushPendingRegistrations` and the Octane listener therefore do not govern automatic mode, and a page containing new phrases makes blocking calls before the response is sent. Failures are swallowed, so the cost is latency rather than correctness; read-only keys skip registration entirely. Raised upstream.
+- **Automatic mode with a write key is development-only.** `translatePage()` does not use the pending-registration queue that `translate()` uses — it calls `canWrite()`, then `registerPhrases()`, then `clearCache()` + `getTranslations()` to refetch, all inline mid-render and all over HTTP. `FlushPendingRegistrations` and the Octane listener therefore do not govern automatic mode, and a page containing new phrases makes three blocking calls before the response is sent. Failures are swallowed, so the cost is latency rather than correctness; read-only keys skip the path entirely. Upstream has confirmed this is a coupling rather than a constraint (the refetch cannot surface translations for the items it is sequenced against, since those were only just registered) and is weighing moving page registration onto the pending queue.
+- **PHP SSR + JS hydration requires `langsys-js-typescript` 0.6.0+**, whose tokenizer skips `data-langsys-phrase`. Older versions re-walk server-tokenized subtrees and split phrases at tag boundaries, fragmenting the shared catalog silently. 0.6.0 is published, so the requirement is satisfiable.
 
 ### Changed (adopting `langsys/langsys-php` v1.1.0)
 
