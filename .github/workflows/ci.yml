@@ -79,3 +79,47 @@ jobs:
       # badge would report that the guard held. Nothing may pass by not running.
       - name: Run tests
         run: vendor/bin/phpunit --fail-on-skipped --fail-on-incomplete
+
+  # The matrix above always resolves langsys/langsys-php to the NEWEST release
+  # satisfying `^1.3`, so it only ever tests the top of our own pin. This leg
+  # tests the bottom — the version a consumer installing today can legitimately
+  # end up with. It matters here specifically because 1.3.1 was the
+  # missing-ICU-argument fix: if the suite has come to depend on it, `^1.3` is a
+  # lie and the consumer who resolves 1.3.0 finds that out instead of us.
+  lowest:
+    name: Lowest resolvable dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: intl, mbstring, curl, json
+          coverage: none
+
+      - name: Assert intl is loaded
+        run: |
+          php -m | grep -qx intl || { echo "::error::ext-intl is not loaded"; exit 1; }
+
+      - name: Validate composer.json
+        run: composer validate --strict --no-check-lock
+
+      # Same advisory block as above: the floor leg pins Laravel 10.
+      - name: Permit EOL Laravel branches to install
+        run: composer config audit.block-insecure false
+
+      - name: Install lowest dependencies
+        run: |
+          composer require --no-interaction --no-update \
+            "laravel/framework:10.*" "orchestra/testbench:8.*"
+          composer update --prefer-dist --prefer-lowest --prefer-stable \
+            --no-interaction --no-progress
+
+      - name: Show what the pin actually resolved to
+        run: composer show langsys/langsys-php | head -3
+
+      - name: Run tests
+        run: vendor/bin/phpunit --fail-on-skipped --fail-on-incomplete
