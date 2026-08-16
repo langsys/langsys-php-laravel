@@ -150,7 +150,19 @@ Only `text/html` responses are touched. JSON, redirects, streamed and file respo
 
 > **If you server-render with this and hydrate with a Langsys JS SDK**, use `langsys-js-typescript` **0.6.2 or newer** (or a framework SDK built on it). Its tokenizer skips `data-langsys-phrase` with semantics matching the PHP side; earlier versions re-walk server-tokenized subtrees and split phrases at tag boundaries — `Read the <a>docs</a> now` registers as three fragments — fragmenting the shared catalog silently and putting a count in a different phrase from the noun it inflects. 0.6.0 and 0.6.1 honour the marker only partially, and fail silently when they don't.
 
-To exclude a subtree from automatic translation, use **`translate="no"`** — standards HTML, honoured by both SDKs.
+#### Excluding a subtree
+
+Two markers, and the difference is not cosmetic:
+
+```blade
+<pre translate="no">composer require langsys/langsys-php-laravel</pre>   {{-- nobody translates this --}}
+<div data-notrans>{{ $userSuppliedHtml }}</div>                        {{-- Langsys skips it --}}
+```
+
+- **`translate="no"`** is standards HTML, so browser translation features (Chrome, Safari, Edge "translate this page") honour it too. Use it for code samples, brand names, identifiers — anything no translator, human or machine, should touch.
+- **`data-notrans`** excludes the subtree from Langsys only; a reader's browser-translation is still free to act on it. Use it for content that's already resolved, or that you handle yourself.
+
+Presence is intent for both: a bare `data-notrans` excludes, and only `="false"` or `="0"` opts back in (trimmed, case-insensitive).
 
 ### Inertia SSR seeding (Vue/React/Svelte SDKs)
 

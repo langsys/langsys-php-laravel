@@ -150,6 +150,46 @@ HTML;
         }
     }
 
+    /**
+     * Exclusion markers, asserted on the REGISTRATION LIST rather than the
+     * rendered page. An exclusion bug reaches the shared catalog long before
+     * anything looks wrong on screen, and catalog pollution is the
+     * irreversible half — a page renders again next request, a bad phrase has
+     * to be hunted down across every SDK reading that catalog.
+     *
+     * These pin semantics that were inverted as recently as v1.1.0, where bare
+     * `data-notrans` LEAKED and `="false"` excluded, so there was no string an
+     * author could write to opt back in. Fixed in v1.2.0: presence is intent,
+     * only "false"/"0" opts out, trimmed and case-insensitive.
+     */
+    public function testExclusionMarkersAreHonouredOnRegistration(): void
+    {
+        $markers = [
+            // attribute            => excluded from registration?
+            'translate="no"'         => true,
+            'translate="NO"'         => true,
+            'data-notrans'           => true,
+            'data-notrans=""'        => true,
+            'data-notrans="true"'    => true,
+            'data-notrans="false"'   => false,
+            'data-notrans="0"'       => false,
+            'data-notrans="FALSE"'   => false,
+            'data-notrans=" false "' => false,
+            'class="plain"'          => false,
+        ];
+
+        foreach ($markers as $attribute => $shouldExclude) {
+            $client = $this->realClient();
+            $client->translatePage("<html><body><p {$attribute}>Sensitive copy</p></body></html>");
+
+            $registered = array_column($client->registered, 'phrase');
+
+            $shouldExclude
+                ? $this->assertNotContains('Sensitive copy', $registered, "[{$attribute}] leaked into the shared catalog.")
+                : $this->assertContains('Sensitive copy', $registered, "[{$attribute}] should not have excluded the subtree.");
+        }
+    }
+
     /** The documented escape hatch for already-resolved subtrees. */
     public function testTranslateNoSubtreeIsLeftAlone(): void
     {

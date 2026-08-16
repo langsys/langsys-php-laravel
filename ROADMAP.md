@@ -66,26 +66,26 @@ How the design landed:
   the `<input>` would exclude attributes we *do* want translated. A skip
   mechanism that covers text nodes but silently misses attribute positions is
   worse than none — it works until someone translates a placeholder.
-- **Do not document `data-notrans` — it is inverted in the shipped SDK.**
-  `langsys/langsys-php` v1.1.0 tests the raw attribute string for PHP
-  truthiness, so the natural bare form is falsy and does nothing. Verified
-  against the installed v1.1.0:
+- **`data-notrans` — RESOLVED in v1.2.0, now documented and tested.** It was
+  inverted through v1.1.0: the raw attribute string was tested for PHP
+  truthiness, so bare `data-notrans` was falsy. Measured here against v1.1.0:
 
   ```
-  translate="no"        -> excluded
   data-notrans          -> LEAKED — registered into the shared catalog
   data-notrans="true"   -> excluded
   data-notrans="false"  -> excluded   (the opt-out value also opts you in)
   ```
 
-  An author writing bare `data-notrans` to protect a subtree gets it extracted
-  and registered instead. Upstream has fixed this (presence = intent, only
-  explicit `"false"`/`"0"` opts out) but **it is not published** — Packagist is
-  still at v1.1.0. This package documents only `translate="no"`, which is
-  unaffected; choosing the standards-based marker over the vendor-specific one
-  sidestepped the bug. **When a PHP release carrying the fix lands: bump the
-  constraint, extend `TranslateResponseSafetyTest` with `data-notrans`
-  coverage, and only then consider documenting it.**
+  Every explicit value excluded, including the one meaning "don't" — there was
+  no string an author could write to opt back in, so the marker was unusable in
+  both directions. This package documented only `translate="no"` throughout, so
+  no user was ever told to write it; picking the standards-based marker over the
+  vendor-specific one avoided the bug by construction. v1.2.0 makes presence
+  intent with only `"false"`/`"0"` opting out, trimmed and case-insensitive.
+  Ten cases now pinned in `TranslateResponseSafetyTest`, asserted on the
+  registration list rather than rendered output — which is the layer where this
+  class of bug surfaces first, and the reason it went unnoticed upstream while
+  fragment tests checking rendered HTML stayed green.
 - **`translate="no"` is the per-subtree escape hatch.** Already honoured by
   `HtmlParser`, `PageTranslator` and `MarkupTokenizer`, and already the
   cross-SDK answer — the JS tokenizer checks it on the line immediately above
