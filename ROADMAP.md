@@ -231,13 +231,30 @@ an incompatibility. Note that `--no-audit` does **not** cover it —
 promises, and Laravel 12 keeps the audit on so a future advisory against a
 supported branch still fails the build.
 
-The unresolved part: **`composer.json` claims `^10.0 || ^11.0 || ^12.0`, and two
-of those three lines cannot be installed by anyone on current Composer without
-opting out of a security control.** Options are to keep the claim (CI proves the
-code works; the block is the consumer's policy choice), or to drop to `^12.0` and
-tag a major. Deliberately not decided unilaterally — it narrows the package's
-supported surface. Whichever way it goes, CI must follow the manifest, not
-diverge from it.
+**Consumer impact, measured rather than inferred** (scratch projects, 2026-08-16).
+The block is narrower than "Laravel 10 users cannot install this":
+
+| scenario | result |
+| --- | --- |
+| `composer require langsys/langsys-php-laravel` into an **existing** Laravel 10 app with a lock file | **works** — installs v1.0.0 cleanly, Composer only *warns* "Found 3 security vulnerability advisories" |
+| `composer update laravel/framework` on that same app | **blocked** |
+| **fresh** `laravel/framework: ^10.0` install with no lock | **blocked** |
+
+Composer blocks *locking* an advisory-flagged version, not *having* one. An app
+already on 10.x isn't re-resolving the framework when it adds a package, so our
+actual consumers are unaffected. What's blocked is starting a new Laravel 10/11
+project or bumping the framework within those lines — neither of which is
+something we'd be enabling anyway.
+
+**Recommendation: keep `^10.0 || ^11.0 || ^12.0`.** Narrowing to `^12.0` would
+force a major on us and strand existing 10.x/11.x apps that can install and run
+this package correctly today — CI proves 63/63 on both lines. The manifest
+describes what the code supports; it was never a claim that Composer's audit
+policy will let someone build a new EOL project. Revisit if upstream Laravel
+publishes an advisory whose range covers 12.x with no fix, since that would
+change who is affected.
+
+Whichever way it goes, CI must follow the manifest, not diverge from it.
 
 ## Closed: `src/Facades/Langsys.php` was never loaded by any test
 
