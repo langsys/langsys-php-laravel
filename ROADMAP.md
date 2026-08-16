@@ -144,12 +144,33 @@ was written to register directly. Content blocks don't force it either —
 `custom_id` is computed locally, so nothing needs a round-trip before the
 response finishes.
 
-Consequence for now: **automatic mode with a write key is a development-only
-configuration**, more strongly than for tagged mode. Upstream has put moving
-page registration onto the pending queue to Darryl — it's a behaviour change to
-a shipped API (a page that currently self-heals within one response would take
-two). **If it lands, delete this section and the read-only-key caveat in the
-README.**
+Consequence while it lasts: **automatic mode with a write key is a
+development-only configuration**, more strongly than for tagged mode.
+
+**FIXED UPSTREAM, NOT YET TAGGED** (`langsys-php@9812d4c` on `main`, > v1.2.0).
+Page registration now routes through the same pending queue as `translate()`,
+so `FlushPendingRegistrations` and the Octane listener drain it exactly as they
+do for `t()`/`@t` — the after-the-response guarantee extends to automatic mode.
+Measured upstream on a page with four new blocks and four new phrases: 5 POSTs
++ 1 GET during render → **zero**, with 2 batched POSTs at flush. It was worse
+than measured here: content blocks registered one POST *each* in a loop, so an
+eight-item page was ten round trips.
+
+**Upgrade checklist for when it tags — all three, or the suite lies:**
+
+1. Bump the constraint, then delete this section and the read-only-key caveat
+   in the README's automatic-translation section.
+2. **Re-point `TranslateResponseSafetyTest::realClient()` from
+   `registerPhrases()` to `queuePhraseForRegistration()`** (made public in the
+   same change; `queueContentBlockForRegistration()` alongside it).
+   `PageTranslator` no longer calls `registerPhrases()`, so the current hook
+   captures nothing. The `assertContains` cases fail loudly — including the
+   deliberate vacuity guard — but every **`assertNotContains` exclusion case
+   would pass vacuously**, proving nothing. Do not just chase the red until it
+   goes green; the green ones are the problem.
+3. Confirm no test asserts same-response self-healing — a page no longer picks
+   up translations an earlier request registered within the same response; they
+   appear on the next one. Nothing here relies on it today.
 - **`data-langsys-phrase` is a `translatePage()`-only feature.** A marked run
   still splits inside a content block. That asymmetry should drive scoping: the
   keep-together primitive is an argument for the response-middleware path over

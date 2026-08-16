@@ -69,6 +69,13 @@ HTML;
              * NOT through the pending queue that translate() uses — so the
              * FlushPendingRegistrations middleware does not govern page
              * registrations. See ROADMAP.
+             *
+             * UPGRADE HOOK: fixed upstream but not yet tagged. Once a release
+             * past v1.2.0 lands, PageTranslator calls
+             * queuePhraseForRegistration() instead and this override captures
+             * NOTHING — at which point the assertNotContains exclusion cases
+             * below pass vacuously. Re-point this hook, don't just fix the
+             * loud failures. See the upgrade checklist in ROADMAP.md.
              */
             public function registerPhrases(array $phrases)
             {
