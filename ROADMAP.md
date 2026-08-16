@@ -212,10 +212,46 @@ PHP-SDK side exists as of v1.1.0, and upstream has confirmed `translatePage($htm
 $category, $selectorCategories, $params)` is stable — the v1.1 markup work changes
 extraction underneath, not the signature. This is purely wrapper work.
 
+## Open decision: `illuminate ^10.0 || ^11.0` is advertised but advisory-blocked
+
+Surfaced while building CI (2026-08-16), and it is a manifest question rather
+than a CI one.
+
+Every `laravel/framework` release in the **10.x and 11.x** lines now carries an
+open, unfixed security advisory — `CVE-2026-48019` among them, whose affected
+range enumerates `>=10.0.0,<11.0.0` and `>=11.0.0,<12.0.0` with no fixed version
+in either branch, because both are past security support. **Composer 2.9 refuses
+to lock advisory-flagged packages by default**, so `composer update` fails
+outright on those lines. Verified: with `audit.block-insecure false` they resolve
+cleanly (10.50.3, 11.55.1) and all 59 tests pass, so this is a policy block, not
+an incompatibility. Note that `--no-audit` does **not** cover it —
+`audit.block-insecure` is a separate switch.
+
+`ci.yml` lifts the block on exactly those legs, so we test what the manifest
+promises, and Laravel 12 keeps the audit on so a future advisory against a
+supported branch still fails the build.
+
+The unresolved part: **`composer.json` claims `^10.0 || ^11.0 || ^12.0`, and two
+of those three lines cannot be installed by anyone on current Composer without
+opting out of a security control.** Options are to keep the claim (CI proves the
+code works; the block is the consumer's policy choice), or to drop to `^12.0` and
+tag a major. Deliberately not decided unilaterally — it narrows the package's
+supported surface. Whichever way it goes, CI must follow the manifest, not
+diverge from it.
+
 ## Closed
 
 - ~~Livewire support was architected but not test-proven.~~ Done — commit
   `fbcda15`, `tests/LivewireSupportTest.php` (39-test suite).
+- ~~The suite ran only on developer machines.~~ Done — `.github/workflows/ci.yml`
+  (`d953726`), 10 matrix legs (PHP 8.1–8.4 × Laravel 10/11/12) plus a
+  lowest-resolvable leg. Two non-obvious guards: `--fail-on-skipped`, because the
+  suite's catalog-pollution guard protects an irreversible failure and a green run
+  with it skipped would be worse than no CI; and an explicit `extension_loaded`
+  assertion, because setup-php's `extensions:` **adds to** the runner image rather
+  than pinning it, so a misspelt name is silently ignored. The `--prefer-lowest`
+  leg confirmed `langsys/langsys-php ^1.3` is honest at its floor: v1.3.0 locks and
+  all 59 tests pass, so nothing has silently come to depend on the 1.3.1 ICU fix.
 
 ## Open bug upstream: missing ICU select argument destroys the sentence
 
