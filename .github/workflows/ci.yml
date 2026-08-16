@@ -1,0 +1,81 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: PHP ${{ matrix.php }} · Laravel ${{ matrix.laravel }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.2', '8.3', '8.4']
+        laravel: ['10.*', '11.*', '12.*']
+        include:
+          - laravel: '10.*'
+            testbench: '8.*'
+          - laravel: '11.*'
+            testbench: '9.*'
+          - laravel: '12.*'
+            testbench: '10.*'
+        exclude:
+          # Laravel 11 and 12 both require PHP >= 8.2.
+          - laravel: '11.*'
+            php: '8.1'
+          - laravel: '12.*'
+            php: '8.1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: intl, mbstring, curl, json
+          coverage: none
+
+      # setup-php's `extensions:` ADDS to whatever the runner image already
+      # ships — it does not pin the extension set. A misspelt name is therefore
+      # silently ignored and the job proceeds against the base image, so the
+      # only way to know intl is present is to assert it. ext-intl is a hard
+      # `require` here, so there is no no-intl degradation path to cover; that
+      # is why this asserts presence only, where langsys-php needs a `:intl`
+      # leg asserting absence as well.
+      - name: Assert intl is loaded
+        run: |
+          php -m | grep -qx intl || { echo "::error::ext-intl is not loaded"; exit 1; }
+
+      # Laravel 10 and 11 are past security support and carry unpatched
+      # advisories (CVE-2026-48019 among them), which Composer 2.9 blocks by
+      # default — every 10.x and 11.x release is refused. composer.json still
+      # claims ^10 || ^11, so CI has to exercise what we promise. Only these
+      # legs lift the block: Laravel 12 keeps the audit on, so a future
+      # advisory against a supported branch still fails the build.
+      - name: Permit EOL Laravel branches to install
+        if: matrix.laravel != '12.*'
+        run: composer config audit.block-insecure false
+
+      - name: Install dependencies
+        run: |
+          composer require --no-interaction --no-update \
+            "laravel/framework:${{ matrix.laravel }}" \
+            "orchestra/testbench:${{ matrix.testbench }}"
+          composer update --prefer-dist --no-interaction --no-progress
+
+      # --fail-on-skipped is load-bearing rather than tidiness. The suite's
+      # catalog-pollution guard (TranslateResponseSafetyTest) protects an
+      # IRREVERSIBLE failure: a phrase wrongly registered into the catalog every
+      # Langsys SDK shares cannot be un-registered by a later fix. A green run
+      # with that test quietly skipped would be worse than no CI, because the
+      # badge would report that the guard held. Nothing may pass by not running.
+      - name: Run tests
+        run: vendor/bin/phpunit --fail-on-skipped --fail-on-incomplete
