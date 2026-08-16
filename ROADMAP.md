@@ -247,9 +247,31 @@ malformed ones — which is why every test that supplies complete params passes.
 
 Reported upstream (mesh topic `icu-missing-select-argument`). **The fix belongs
 there, not here** — do not reintroduce a wrapper-side Interpolator to work
-around it. No failing test is parked in this suite; verify against the real
-interpolator when a release lands, including the `plural` half, where the only
-available remedy is falling through rather than defaulting.
+around it. No failing test is parked in this suite.
+
+**FIXED UPSTREAM, NOT YET TAGGED.** A missing argument now selects `other`,
+which every `plural` and `select` must provide: `select` yields a *correct*
+sentence (the neutral branch is what an unknown gender should render), while
+`plural` keeps the count visible as `{count} items` — imperfect by design, since
+nothing can infer a count, but the sentence survives. When it tags, verify
+against the real interpolator including the `plural` half, which is the one
+whose output is deliberately imperfect rather than correct. The branch can be
+deleted at that point.
+
+Two corrections worth keeping, both from upstream checking rather than assuming:
+
+- **giancapra's commit message says the base JS SDK already carries this guard.
+  It does not.** Upstream read `interpolate.ts` and verified against the
+  published 0.6.3 tarball: `intl-messageformat` *throws* where PHP's
+  `MessageFormatter` echoes, so JS falls through and emits the **entire raw ICU
+  pattern**. Both SDKs were broken, differently, and there was no parity
+  reference to copy. Relevant here because this package hands the same catalog
+  to the JS SDKs through `InertiaSsrProps` — a gendered phrase rendered
+  client-side has its own version of this bug until the JS side is fixed too.
+- **The fix also removed an `ext-intl` divergence.** Behaviour previously
+  differed with and without the extension (intl echoed a bare `{arg}`, no-intl
+  left the whole pattern), so one input had two different broken outputs on the
+  same SDK. They now agree.
 
 ## Cross-SDK notes
 
