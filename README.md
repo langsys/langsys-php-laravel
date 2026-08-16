@@ -1,5 +1,12 @@
 # Langsys SDK - Laravel
 
+[![packagist](https://img.shields.io/packagist/v/langsys/langsys-php-laravel.svg?style=flat)](https://packagist.org/packages/langsys/langsys-php-laravel)
+[![last commit](https://img.shields.io/github/last-commit/langsys/langsys-php-laravel.svg?style=flat)](https://github.com/langsys/langsys-php-laravel/commits)
+[![commit activity](https://img.shields.io/github/commit-activity/m/langsys/langsys-php-laravel.svg?style=flat)](https://github.com/langsys/langsys-php-laravel/pulse)
+[![php](https://img.shields.io/packagist/dependency-v/langsys/langsys-php-laravel/php?style=flat)](https://packagist.org/packages/langsys/langsys-php-laravel)
+[![laravel](https://img.shields.io/packagist/dependency-v/langsys/langsys-php-laravel/illuminate%2Fsupport?style=flat&label=laravel)](https://packagist.org/packages/langsys/langsys-php-laravel)
+[![license](https://img.shields.io/packagist/l/langsys/langsys-php-laravel.svg?style=flat)](./LICENSE)
+
 Langsys revolutionizes localization for apps with easy to integrate, realtime, continuous translations. Read more about Langsys Translation Manager [at the website](https://Langsys.dev/).
 
 Integrate the Langsys Translation Manager into your Laravel application — Blade, Livewire, Alpine's server-rendered content, and Inertia SSR seeding for the JS SDKs.
