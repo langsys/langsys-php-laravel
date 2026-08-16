@@ -271,8 +271,12 @@ the code, so anyone reading `{count}` as a bug meets the reasoning first.
 
 The two intl modes now agree byte-for-byte, including on the incomplete-param
 cases that previously produced two different broken outputs from one input.
-`refactor/827_gender_context_translation` has served its purpose and can be
-deleted (giancapra's branch — theirs to call).
+
+`refactor/827_gender_context_translation` was deleted once this shipped, having
+served its purpose. Its single commit is **`229732fbd75eb9805aadaa64083349cb3c152d62`**
+(giancapra, 2026-08-04) — recoverable by SHA if the original patch is ever
+wanted, though it targets the deleted wrapper-side `Interpolator` and is
+superseded by upstream's fix.
 
 Two corrections worth keeping, both from upstream checking rather than assuming:
 
