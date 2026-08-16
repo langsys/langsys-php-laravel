@@ -45,9 +45,6 @@ HTML;
     private function realClient(): Client
     {
         return new class ('test-key', 'test-project', ['cache_driver' => 'none']) extends Client {
-            /** @var list<array{phrase: string, category: string}> */
-            public array $registered = [];
-
             public function getLocale()
             {
                 return 'es-es';
@@ -65,27 +62,35 @@ HTML;
             }
 
             /**
-             * translatePage() registers through this public method directly,
-             * NOT through the pending queue that translate() uses — so the
-             * FlushPendingRegistrations middleware does not govern page
-             * registrations. See ROADMAP.
-             *
-             * UPGRADE HOOK: fixed upstream but not yet tagged. Once a release
-             * past v1.2.0 lands, PageTranslator calls
-             * queuePhraseForRegistration() instead and this override captures
-             * NOTHING — at which point the assertNotContains exclusion cases
-             * below pass vacuously. Re-point this hook, don't just fix the
-             * loud failures. See the upgrade checklist in ROADMAP.md.
+             * The SDK registers a shutdown handler that flushes whatever is
+             * still queued. These tests deliberately leave phrases queued —
+             * that IS the assertion — so without this the suite would POST
+             * them for real at process exit. Harmless against a fake key;
+             * against a developer's real credentials it would register test
+             * fixtures into a live catalog shared by every Langsys SDK.
              */
-            public function registerPhrases(array $phrases)
+            public function flushPendingRegistrations()
             {
-                foreach ($phrases as $phrase) {
-                    $this->registered[] = $phrase;
-                }
-
-                return ['success' => true];
+                return ['phrases' => 0, 'content_blocks' => 0, 'success' => true];
             }
         };
+    }
+
+    /**
+     * What actually reaches the shared catalog. As of langsys-php v1.3.0,
+     * translatePage() queues through queuePhraseForRegistration() and the
+     * queue is drained after the response by FlushPendingRegistrations — so
+     * the pending queue, not any transport call, is the boundary that decides
+     * what gets registered. Read it directly rather than overriding a method,
+     * so nothing here can quietly stop capturing when the internals move
+     * again: if the queue API changes, this fails to compile rather than
+     * passing vacuously.
+     *
+     * @return list<string>
+     */
+    private function queuedPhrases(Client $client): array
+    {
+        return array_column($client->getPendingPhrases(), 'phrase');
     }
 
     private function translatedPage(): string
@@ -138,20 +143,22 @@ HTML;
         $client = $this->realClient();
         $client->translatePage(self::PAGE);
 
-        // Guard the guard: if the walker registered nothing at all, the loop
-        // below would pass vacuously and this test would prove nothing.
+        $queued = $this->queuedPhrases($client);
+
+        // Guard the guard: if the walker queued nothing at all, the loop below
+        // would pass vacuously and this test would prove nothing.
         $this->assertContains(
             'Continue to checkout',
-            array_column($client->registered, 'phrase'),
-            'Expected the untranslated heading to be registered — otherwise this test is vacuous.'
+            $queued,
+            'Expected the untranslated heading to be queued — otherwise this test is vacuous.'
         );
 
-        foreach ($client->registered as $entry) {
+        foreach ($queued as $phrase) {
             foreach (['window.', 'fetch(', 'csrf', 'addEventListener', '::after', 'tok_A1B2C3'] as $needle) {
                 $this->assertStringNotContainsString(
                     $needle,
-                    $entry['phrase'],
-                    "Registered a phrase carrying script/style content: {$entry['phrase']}"
+                    $phrase,
+                    "Queued a phrase carrying script/style content: {$phrase}"
                 );
             }
         }
@@ -182,6 +189,9 @@ HTML;
             'data-notrans="0"'       => false,
             'data-notrans="FALSE"'   => false,
             'data-notrans=" false "' => false,
+            // Control: an unmarked subtree MUST be queued. This is what proves
+            // the capture point is live, so the exclusions above are absences
+            // of something that would otherwise be there.
             'class="plain"'          => false,
         ];
 
@@ -189,11 +199,11 @@ HTML;
             $client = $this->realClient();
             $client->translatePage("<html><body><p {$attribute}>Sensitive copy</p></body></html>");
 
-            $registered = array_column($client->registered, 'phrase');
+            $queued = $this->queuedPhrases($client);
 
             $shouldExclude
-                ? $this->assertNotContains('Sensitive copy', $registered, "[{$attribute}] leaked into the shared catalog.")
-                : $this->assertContains('Sensitive copy', $registered, "[{$attribute}] should not have excluded the subtree.");
+                ? $this->assertNotContains('Sensitive copy', $queued, "[{$attribute}] leaked into the shared catalog.")
+                : $this->assertContains('Sensitive copy', $queued, "[{$attribute}] should not have excluded the subtree.");
         }
     }
 
@@ -204,10 +214,12 @@ HTML;
         $html = $client->translatePage(self::PAGE);
 
         $this->assertStringContainsString('<p translate="no">Guardar</p>', $html);
-        $this->assertSame(
-            [],
-            array_filter($client->registered, fn (array $e) => $e['phrase'] === 'Guardar'),
-            'A translate="no" subtree must not be registered as a source phrase.'
-        );
+
+        $queued = $this->queuedPhrases($client);
+
+        // Positive assertion first, so the absence below can't pass against an
+        // empty queue that never captured anything.
+        $this->assertContains('Continue to checkout', $queued, 'Capture point is not live.');
+        $this->assertNotContains('Guardar', $queued, 'A translate="no" subtree must not be queued as a source phrase.');
     }
 }

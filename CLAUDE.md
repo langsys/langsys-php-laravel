@@ -56,7 +56,7 @@ The call path for every translation is: **`t()` / `@t` → `LangsysTranslator` �
 
 **A project picks one.** Running both makes the middleware re-walk `@t`-translated nodes, look the *translated* string up as a source phrase, miss, and register it — poisoning the catalog every Langsys SDK shares with translated strings posing as source text. `translate="no"` is the per-subtree escape hatch; do not invent a wrapper-side skip marker.
 
-`TranslateResponse` decides only **whether** to call `translatePage()` and **what to hand it** — never what inside the HTML gets translated. Two things it does not inherit from tagged mode: page registration bypasses the flush middleware (inline HTTP, so write keys are dev-only), and PHP SSR + JS hydration requires a JS SDK whose tokenizer knows `data-langsys-phrase`. Both are in `ROADMAP.md`; read it before changing this middleware.
+`TranslateResponse` decides only **whether** to call `translatePage()` and **what to hand it** — never what inside the HTML gets translated. Registration flushes after the response like tagged mode (upstream ^1.3; it was inline before). The one thing it doesn't share: PHP SSR + JS hydration requires `langsys-js-typescript` ≥0.6.2, whose tokenizer knows `data-langsys-phrase`. See `ROADMAP.md` before changing this middleware.
 
 ## Conventions
 

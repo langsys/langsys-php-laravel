@@ -144,7 +144,7 @@ LANGSYS_TRANSLATE_RESPONSE=true
 
 Only `text/html` responses are touched. JSON, redirects, streamed and file responses pass through untouched — which is what keeps Livewire and Inertia XHR round-trips out automatically. Scope it further with `only` / `except` path patterns in `config/langsys.php` (`except` wins), and set a `category` to namespace everything the page registers.
 
-**Use a read-only key in production with this middleware.** Unlike `t()` / `@t` — whose newly discovered phrases are queued and flushed *after* the response — `translatePage()` registers inline, mid-render: a permissions check, the registration POST, and a catalog refetch, all blocking before the response is sent. On a write key a page containing new phrases pays all three. Failures are swallowed, so it costs latency rather than correctness, and read-only keys skip the path entirely.
+Newly discovered phrases are queued and flushed after the response, exactly as they are for `t()` / `@t` — the same terminable middleware and Octane listener drain both. Requires `langsys/langsys-php` ^1.3; before that, page registration made blocking HTTP calls mid-render.
 
 **Caching is off by default and should usually stay off.** Translated output is keyed by a hash of the source HTML, so a page carrying a CSRF token or a timestamp produces a new key every render. Enable it only for genuinely static, high-traffic HTML.
 

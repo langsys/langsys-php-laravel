@@ -112,7 +112,19 @@ How the design landed:
   registered, so the guard can't pass vacuously. Keep that test honest if the
   page fixture changes.
 
-### Found while building: page registration bypasses the flush middleware
+### Closed: page registration bypassed the flush middleware (fixed in v1.3.0)
+
+Reported from here, fixed upstream, adopted. `translatePage()` now queues
+through `queuePhraseForRegistration()` / `queueContentBlockForRegistration()`
+like `translate()` does, so `FlushPendingRegistrations` and the Octane listener
+drain page registration too — the after-the-response guarantee covers both
+modes. Upstream measured a page with four new blocks and four new phrases going
+from 5 POSTs + 1 GET during render to **zero**, with 2 batched POSTs at flush.
+
+Kept for the reasoning, since the same shape could recur:
+
+<details>
+<summary>What it was, and why it wasn't a constraint</summary>
 
 `translatePage()` does **not** use the pending-registration queue that
 `translate()` uses. It calls `Client::canWrite()` and then
@@ -147,40 +159,44 @@ response finishes.
 Consequence while it lasts: **automatic mode with a write key is a
 development-only configuration**, more strongly than for tagged mode.
 
-**FIXED UPSTREAM, NOT YET TAGGED** (`langsys-php@9812d4c` on `main`, > v1.2.0).
-Page registration now routes through the same pending queue as `translate()`,
-so `FlushPendingRegistrations` and the Octane listener drain it exactly as they
-do for `t()`/`@t` — the after-the-response guarantee extends to automatic mode.
-Measured upstream on a page with four new blocks and four new phrases: 5 POSTs
-+ 1 GET during render → **zero**, with 2 batched POSTs at flush. It was worse
-than measured here: content blocks registered one POST *each* in a loop, so an
-eight-item page was ten round trips.
+It was worse than first measured: content blocks registered one POST *each* in
+a loop, so an eight-item page was ten round trips, not two.
 
-**Upgrade checklist for when it tags — all three, or the suite lies:**
+</details>
 
-1. Bump the constraint, then delete this section and the read-only-key caveat
-   in the README's automatic-translation section.
-2. **Re-point `TranslateResponseSafetyTest::realClient()` from
-   `registerPhrases()` to `queuePhraseForRegistration()`** (made public in the
-   same change; `queueContentBlockForRegistration()` alongside it).
-   `PageTranslator` no longer calls `registerPhrases()`, so the current hook
-   captures nothing. The `assertContains` cases fail loudly — including the
-   deliberate vacuity guard — but every **`assertNotContains` exclusion case
-   would pass vacuously**, proving nothing. Do not just chase the red until it
-   goes green; the green ones are the problem.
-3. Confirm no test asserts same-response self-healing — a page no longer picks
-   up translations an earlier request registered within the same response; they
-   appear on the next one. Nothing here relies on it today.
+**Lesson kept from the upgrade — a moved capture point fails asymmetrically.**
+`TranslateResponseSafetyTest` used to hook `registerPhrases()`. After v1.3.0
+nothing calls it, so that hook recorded nothing: the `assertContains` cases
+failed loudly, but every `assertNotContains` exclusion case would have **passed
+vacuously**, "proving" exclusion against a recorder that recorded nothing.
+Chasing the red to green would have left the silent half broken.
+
+The test now reads `Client::getPendingPhrases()` directly instead of overriding
+a method — the actual boundary deciding what reaches the catalog, and one that
+breaks loudly rather than quietly if it moves again. Every absence assertion is
+paired with a positive control (an unmarked subtree MUST be queued) proving the
+capture point is live. Apply that pairing to any new exclusion test.
+
+**Also:** the SDK's `register_shutdown_function` flushes whatever is still
+queued at process exit. Tests that deliberately leave phrases queued must stub
+`flushPendingRegistrations()`, or the suite POSTs them for real — harmless
+against a fake key, but it would write test fixtures into a live shared catalog
+if a developer had real credentials in their environment.
+
+- **Same-response self-healing is gone**, by design: a page no longer picks up
+  translations an earlier request registered within the same response. They
+  appear on the next one. Nothing here relied on it.
 - **`data-langsys-phrase` is a `translatePage()`-only feature.** A marked run
   still splits inside a content block. That asymmetry should drive scoping: the
   keep-together primitive is an argument for the response-middleware path over
   content blocks for markup-bearing copy.
-- **Requires `langsys/langsys-php` ^1.0.1 at minimum, ^1.1.0 in practice.** In
-  v1.0.0 `translatePage()` never interpolated the `<head>`, so `<title>`, meta
-  description and `og:*`/`twitter:*` shipped raw `{name}` to the browser while
-  the body resolved correctly. Fixed in v1.0.1 — but it means any prototype of
-  this middleware built against v1.0.0 would have looked correct in-page while
-  silently corrupting social/SEO metadata.
+- **Requires `langsys/langsys-php` ^1.3** — each earlier version is unusable
+  here for a different reason, which is worth knowing before anyone relaxes the
+  constraint: v1.0.0 never interpolated the `<head>` (so `<title>` and
+  `og:*`/`twitter:*` shipped raw `{name}` while the body looked correct);
+  through v1.2.0 page registration blocked the response with inline HTTP; and
+  through v1.1.0 `data-notrans` excluded nothing. Every one of those fails
+  quietly.
 
 **The boundary that keeps this a wrapper.** The middleware may decide **whether**
 to call `translatePage()` and **what to hand it**. It must never decide **what
