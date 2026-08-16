@@ -249,14 +249,30 @@ Reported upstream (mesh topic `icu-missing-select-argument`). **The fix belongs
 there, not here** — do not reintroduce a wrapper-side Interpolator to work
 around it. No failing test is parked in this suite.
 
-**FIXED UPSTREAM, NOT YET TAGGED.** A missing argument now selects `other`,
-which every `plural` and `select` must provide: `select` yields a *correct*
-sentence (the neutral branch is what an unknown gender should render), while
-`plural` keeps the count visible as `{count} items` — imperfect by design, since
-nothing can infer a count, but the sentence survives. When it tags, verify
-against the real interpolator including the `plural` half, which is the one
-whose output is deliberately imperfect rather than correct. The branch can be
-deleted at that point.
+**FIXED AND RELEASED in `langsys/langsys-php` v1.3.1** — adopted and verified
+here against the real interpolator, in both intl modes:
+
+```
+                      WITH intl            WITHOUT intl (php -n)
+select complete    -> 'Bienvenida Sarah'   'Bienvenida Sarah'
+select MISSING     -> 'Bienvenide Sarah'   'Bienvenide Sarah'    (was '{name_gender} Sarah')
+select NULL arg    -> 'Bienvenide Sarah'   'Bienvenide Sarah'
+plural complete    -> '1 item'             '1 item'
+plural MISSING     -> '{count} items'      '{count} items'       (was '{count}')
+```
+
+A missing argument selects `other`, which every `plural` and `select` must
+provide. **The asymmetry is deliberate and must not be "fixed":** for `select`,
+`other` is genuinely the right branch for an unknown gender, so the sentence is
+*correct*; for `plural` nothing can infer a count, so `{count} items` is merely
+*less bad* than a destroyed sentence or a dumped pattern. Upstream defends this
+in `testMissingPluralArgumentKeepsTheSentenceAndShowsTheGap` and in a comment at
+the code, so anyone reading `{count}` as a bug meets the reasoning first.
+
+The two intl modes now agree byte-for-byte, including on the incomplete-param
+cases that previously produced two different broken outputs from one input.
+`refactor/827_gender_context_translation` has served its purpose and can be
+deleted (giancapra's branch — theirs to call).
 
 Two corrections worth keeping, both from upstream checking rather than assuming:
 
