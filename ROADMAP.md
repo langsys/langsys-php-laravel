@@ -239,6 +239,28 @@ tag a major. Deliberately not decided unilaterally — it narrows the package's
 supported surface. Whichever way it goes, CI must follow the manifest, not
 diverge from it.
 
+## Open gap: `src/Facades/Langsys.php` is never loaded by any test
+
+Found 2026-08-16 by a probe comparing `get_included_files()` against `src/`
+after a full run: **9 of 10 source files are parsed by the suite, and the facade
+is the one that isn't.** It is documented public API — README's "The facade and
+the raw client" — with 59 green tests and not one of them causing the class to
+compile.
+
+This was found while retiring a wrong assumption, and the assumption is the more
+useful half: *running the suite on the 8.1 floor does not subsume linting.* PHP
+parses a file only when something loads it, so PSR-4 means an unreferenced class
+is never compiled and 8.2+ syntax in it survives a fully green matrix. Execution
+dominates linting only over the set actually loaded, and nothing pins that set.
+`.github/workflows/ci.yml` now has a `lint` job closing that structurally, so the
+next unreferenced file is caught by parse even before anyone writes a test for it.
+
+The lint job covers syntax only. The facade still has **no behavioural test** —
+`Langsys::translate()` and `Langsys::client()` are unproven, and a wrong
+`getFacadeAccessor()` would be caught by neither the lint nor the suite. Worth a
+small test binding the facade root and asserting both calls reach
+`LangsysTranslator`.
+
 ## Closed
 
 - ~~Livewire support was architected but not test-proven.~~ Done — commit
