@@ -148,7 +148,9 @@ Only `text/html` responses are touched. JSON, redirects, streamed and file respo
 
 **Caching is off by default and should usually stay off.** Translated output is keyed by a hash of the source HTML, so a page carrying a CSRF token or a timestamp produces a new key every render. Enable it only for genuinely static, high-traffic HTML.
 
-> **If you server-render with this and hydrate with a Langsys JS SDK**, use `langsys-js-typescript` **0.6.0 or newer** (or a framework SDK built on it). Its tokenizer skips `data-langsys-phrase`; older versions re-walk server-tokenized subtrees and split phrases at tag boundaries — `Read the <a>docs</a> now` registers as three fragments — fragmenting the shared catalog silently and putting a count in a different phrase from the noun it inflects.
+> **If you server-render with this and hydrate with a Langsys JS SDK**, use `langsys-js-typescript` **0.6.2 or newer** (or a framework SDK built on it). Its tokenizer skips `data-langsys-phrase` with semantics matching the PHP side; earlier versions re-walk server-tokenized subtrees and split phrases at tag boundaries — `Read the <a>docs</a> now` registers as three fragments — fragmenting the shared catalog silently and putting a count in a different phrase from the noun it inflects. 0.6.0 and 0.6.1 honour the marker only partially, and fail silently when they don't.
+
+To exclude a subtree from automatic translation, use **`translate="no"`** — standards HTML, honoured by both SDKs.
 
 ### Inertia SSR seeding (Vue/React/Svelte SDKs)
 
