@@ -217,6 +217,40 @@ extraction underneath, not the signature. This is purely wrapper work.
 - ~~Livewire support was architected but not test-proven.~~ Done — commit
   `fbcda15`, `tests/LivewireSupportTest.php` (39-test suite).
 
+## Open bug upstream: missing ICU select argument destroys the sentence
+
+**Do not delete `refactor/827_gender_context_translation`.** It is the only
+record of this analysis, and it is not a stale branch — it carries an unmerged
+fix by giancapra (2026-08-04) against `src/Interpolator.php`, a file deleted
+here when interpolation was consolidated into `langsys/langsys-php`. The fix
+therefore went nowhere, and the bug it fixed is live in upstream v1.3.0, which
+this package now delegates to. Verified against the installed version:
+
+```php
+$tpl = '{name_gender, select, male {Bienvenido} female {Bienvenida} other {Bienvenide}} {name}';
+interpolate($tpl, ['name' => 'Sarah', 'name_gender' => 'female'], 'es-ES');  // 'Bienvenida Sarah'
+interpolate($tpl, ['name' => 'Sarah'], 'es-ES');                             // '{name_gender} Sarah'  <-- sentence gone
+interpolate('{count, plural, one {# item} other {# items}}', [], 'es-ES');   // '{count}'
+```
+
+**Reachable without caller error.** The ICU promoter in langsys-ai introduces a
+select argument the source phrase never carried — `{name}` becomes
+`{name_gender, select, …}` in gendered target locales — so an app cannot supply
+a value it has no way to know about. Any app translating into a gendered locale
+hits it.
+
+**Why upstream's malformed-ICU fallback doesn't catch it:** `MessageFormatter`
+neither throws nor returns `false`; it returns a bare `{name_gender}`, which
+reads as success, so the ICU path never falls through to simple substitution. A
+*well-formed* pattern with a missing argument bypasses the guard built for
+malformed ones — which is why every test that supplies complete params passes.
+
+Reported upstream (mesh topic `icu-missing-select-argument`). **The fix belongs
+there, not here** — do not reintroduce a wrapper-side Interpolator to work
+around it. No failing test is parked in this suite; verify against the real
+interpolator when a release lands, including the `plural` half, where the only
+available remedy is falling through rather than defaulting.
+
 ## Cross-SDK notes
 
 - `%name%` markup placeholders (base JS SDK `langsys-js-typescript` ^0.4.1) are a
