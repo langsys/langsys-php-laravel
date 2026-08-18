@@ -116,7 +116,7 @@ With a write key, phrases that miss the catalog are queued in-memory during the 
 
 ### Livewire
 
-Nothing extra to configure: Livewire's AJAX updates run through the same `web` middleware, so `t()` inside components resolves in the page's locale and newly discovered phrases flush after every update. Verified end-to-end in `tests/LivewireSupportTest.php` — a real component renders `@t` with interpolation, and a phrase that only appears after an interaction is discovered on the Livewire update and drained by the flush middleware.
+Nothing extra to configure: Livewire's AJAX updates run through the same `web` middleware, so `t()` inside components resolves in the page's locale and newly discovered phrases flush after every update. Verified end-to-end in [`tests/LivewireSupportTest.php`](https://github.com/langsys/langsys-php-laravel/blob/main/tests/LivewireSupportTest.php) — a real component renders `@t` with interpolation, and a phrase that only appears after an interaction is discovered on the Livewire update and drained by the flush middleware.
 
 ```php
 class Checkout extends Component
@@ -225,7 +225,7 @@ Bind a fake client so tests never hit the API:
 $this->app->instance(\Langsys\SDK\Client::class, $yourFakeClient);
 ```
 
-This package's own suite (`composer test`) shows a complete `FakeClient` pattern in `tests/Fakes/FakeClient.php`.
+This package's own suite shows a complete `FakeClient` pattern in [`tests/Fakes/FakeClient.php`](https://github.com/langsys/langsys-php-laravel/blob/main/tests/Fakes/FakeClient.php). Tests are excluded from the released archive, so read it in the repository rather than under `vendor/`.
 
 ## License
 

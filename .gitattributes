@@ -1,0 +1,23 @@
+# Keep development-only files out of the dist archive Packagist builds for each
+# tag, so `composer require --prefer-dist` doesn't put them in every consumer's
+# vendor/ directory. Affects the archive only — the git repository is unchanged,
+# and `--prefer-source` installs still get everything.
+#
+# Takes effect on the NEXT tag: dist archives are built per release, so v1.0.0
+# keeps shipping what it shipped.
+#
+# Deliberately kept in the archive: README.md, CHANGELOG.md and LICENSE, which
+# are the files someone reads from inside vendor/ or that packaging tooling
+# expects to find.
+
+/.github            export-ignore
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/phpunit.xml        export-ignore
+/tests              export-ignore
+
+# Contributor-facing docs. CLAUDE.md is guidance for agents working ON this
+# package; ROADMAP.md is deferred work and design history. Neither means
+# anything to someone consuming the package.
+/CLAUDE.md          export-ignore
+/ROADMAP.md         export-ignore
