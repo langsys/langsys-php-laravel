@@ -298,14 +298,17 @@ catches the next unreferenced file by parse before anyone writes a test for it.
   leg confirmed `langsys/langsys-php ^1.3` is honest at its floor: v1.3.0 locks and
   all 59 tests pass, so nothing has silently come to depend on the 1.3.1 ICU fix.
 
-## Open bug upstream: missing ICU select argument destroys the sentence
+## Closed: missing ICU select argument destroyed the sentence
 
-**Do not delete `refactor/827_gender_context_translation`.** It is the only
-record of this analysis, and it is not a stale branch — it carries an unmerged
-fix by giancapra (2026-08-04) against `src/Interpolator.php`, a file deleted
-here when interpolation was consolidated into `langsys/langsys-php`. The fix
-therefore went nowhere, and the bug it fixed is live in upstream v1.3.0, which
-this package now delegates to. Verified against the installed version:
+**Fixed upstream in `langsys/langsys-php` v1.3.1 and adopted here — full
+resolution further down this section.** The analysis is kept because it is the
+only record of how the bug was found, and because the failure mode recurs.
+
+Found via `refactor/827_gender_context_translation`, an unmerged fix by
+giancapra (2026-08-04) against `src/Interpolator.php` — a file deleted here when
+interpolation was consolidated into `langsys/langsys-php`. That fix therefore
+went nowhere, and the bug it addressed was live in upstream v1.3.0, which this
+package delegates to. Verified against v1.3.0 at the time:
 
 ```php
 $tpl = '{name_gender, select, male {Bienvenido} female {Bienvenida} other {Bienvenide}} {name}';
