@@ -212,10 +212,10 @@ PHP-SDK side exists as of v1.1.0, and upstream has confirmed `translatePage($htm
 $category, $selectorCategories, $params)` is stable — the v1.1 markup work changes
 extraction underneath, not the signature. This is purely wrapper work.
 
-## Open decision: `illuminate ^10.0 || ^11.0` is advertised but advisory-blocked
+## Decided: keep `illuminate ^10.0 || ^11.0 || ^12.0`
 
-Surfaced while building CI (2026-08-16), and it is a manifest question rather
-than a CI one.
+**Decision (Darryl, 2026-08-18): keep the constraint as it stands.** Surfaced
+while building CI (2026-08-16); it was a manifest question rather than a CI one.
 
 Every `laravel/framework` release in the **10.x and 11.x** lines now carries an
 open, unfixed security advisory — `CVE-2026-48019` among them, whose affected
@@ -223,7 +223,7 @@ range enumerates `>=10.0.0,<11.0.0` and `>=11.0.0,<12.0.0` with no fixed version
 in either branch, because both are past security support. **Composer 2.9 refuses
 to lock advisory-flagged packages by default**, so `composer update` fails
 outright on those lines. Verified: with `audit.block-insecure false` they resolve
-cleanly (10.50.3, 11.55.1) and all 59 tests pass, so this is a policy block, not
+cleanly (10.50.3, 11.55.1) and the full suite passes, so this is a policy block, not
 an incompatibility. Note that `--no-audit` does **not** cover it —
 `audit.block-insecure` is a separate switch.
 
@@ -246,15 +246,21 @@ actual consumers are unaffected. What's blocked is starting a new Laravel 10/11
 project or bumping the framework within those lines — neither of which is
 something we'd be enabling anyway.
 
-**Recommendation: keep `^10.0 || ^11.0 || ^12.0`.** Narrowing to `^12.0` would
-force a major on us and strand existing 10.x/11.x apps that can install and run
-this package correctly today — CI proves 63/63 on both lines. The manifest
-describes what the code supports; it was never a claim that Composer's audit
-policy will let someone build a new EOL project. Revisit if upstream Laravel
-publishes an advisory whose range covers 12.x with no fix, since that would
-change who is affected.
+**Why keep it.** Narrowing to `^12.0` would force a major on us and strand
+existing 10.x/11.x apps that install and run this package correctly today — CI
+proves the full suite green on both lines every push. The manifest describes what
+the *code* supports; it was never a claim that Composer's audit policy will let
+someone build a new EOL project. Dropping support because a third party's audit
+policy blocks a scenario we don't enable would be inventing a limitation, not
+documenting one.
 
-Whichever way it goes, CI must follow the manifest, not diverge from it.
+**Revisit if** upstream Laravel publishes an advisory whose range covers 12.x
+with no fixed version. That would change *who* is affected — from "people
+starting new EOL projects" to "everyone" — and the calculus with it.
+
+CI must follow the manifest, not diverge from it: the Laravel 10/11 legs lift
+`audit.block-insecure` precisely so we keep testing what we promise. If the
+manifest ever narrows, those legs go with it.
 
 ## Closed: `src/Facades/Langsys.php` was never loaded by any test
 

@@ -18,6 +18,8 @@ Integrate the Langsys Translation Manager into your Laravel application — Blad
 - **PHP 8.1+**, **Laravel 10, 11, or 12**
 - **`ext-intl`** (required — ICU plural rules and locale-aware number/date formatting). Note that the official `php:8.x-fpm` Docker images do not bundle it; add `docker-php-ext-install intl`.
 
+> **On Laravel 10 and 11:** both lines are past Laravel's security-support window and carry unpatched advisories, so **Composer 2.9+ refuses to lock any release in them by default.** This package supports and tests both — CI runs the full suite against Laravel 10, 11 and 12 on every push — and adding it to an *existing* 10.x/11.x app works normally, because Composer blocks *locking* an advisory-flagged version, not *having* one. What it blocks is resolving the framework afresh: a new Laravel 10/11 project, or `composer update laravel/framework` within those lines. That's Laravel's advisory status rather than anything about this package, and if you hit it, `composer config audit.block-insecure false` is the (deliberate, project-wide) opt-out.
+
 ## How it's layered
 
 `langsys/langsys-php-laravel` is a Laravel wrapper over the dependency-free [`langsys/langsys-php`](https://github.com/langsys/langsys-php) — which owns the HTTP client, phrase lookup, **placeholder interpolation**, token discovery/queueing, and catalog caching. This package adds only the Laravel-native concerns:
