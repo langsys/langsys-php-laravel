@@ -3,11 +3,8 @@
 namespace Langsys\Laravel\Http\Middleware;
 
 use Closure;
-use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Http\Request;
 use Langsys\SDK\Client;
-use Langsys\SDK\Exception\LangsysException;
-use Langsys\SDK\Locale\LocaleDetector;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -27,16 +24,16 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * text. Use `translate="no"` on any subtree that is already resolved.
  *
  * The wrapper's boundary: this class decides only WHETHER to call
- * `translatePage()` and WHAT to hand it. It never inspects the HTML. Which
+ * `translatePage()` and WHAT to hand it. It never inspects the HTML, and it
+ * keeps nothing: a translated page is not cached here (BIND-5). Which
  * elements are walked, which attributes are translatable, what `translate="no"`
- * means and how markup is tokenized all belong to langsys/langsys-php.
+ * means, how markup is tokenized and what a failure degrades to all belong to
+ * langsys/langsys-php.
  */
 class TranslateResponse
 {
-    public function __construct(
-        private readonly Client $client,
-        private readonly CacheFactory $cache,
-    ) {
+    public function __construct(private readonly Client $client)
+    {
     }
 
     public function handle(Request $request, Closure $next): Response
@@ -53,13 +50,22 @@ class TranslateResponse
             return $response;
         }
 
-        $translated = $this->_translate($html, LocaleDetector::normalize(app()->getLocale()));
+        // translatePage() resolves the locale from the client rather than an
+        // argument, and returns the HTML untouched when it is null. Set it
+        // explicitly from the app locale — the same value LangsysTranslator
+        // uses — so this middleware and `@t` can never disagree about which
+        // language a page is in, and so we never fall through to
+        // Client::getLocale(), which auto-detects from $_SERVER and can
+        // trigger an HTTP call for the project's base locale.
+        $this->client->setLocale(app()->getLocale());
 
-        // A null result means the lookup failed or produced nothing usable;
-        // leave the original response untouched rather than blanking a page.
-        if ($translated !== null) {
-            $response->setContent($translated);
-        }
+        // Served as returned. translatePage() never throws and hands back the
+        // source HTML on every degraded path (WIRE-4), so a guard here would be
+        // a second fallback that could only drift from the SDK's own.
+        $response->setContent($this->client->translatePage(
+            $html,
+            config('langsys.translate_response.category')
+        ));
 
         return $response;
     }
@@ -106,72 +112,5 @@ class TranslateResponse
         $only = config('langsys.translate_response.only', []);
 
         return $only === [] || $request->is(...$only);
-    }
-
-    private function _translate(string $html, string $locale): ?string
-    {
-        $key = $this->_cacheKey($html, $locale);
-
-        if ($key !== null) {
-            $cached = $this->_store()->get($key);
-
-            if (is_string($cached)) {
-                return $cached;
-            }
-        }
-
-        // translatePage() resolves the locale from the client rather than an
-        // argument, and returns the HTML untouched when it is null. Set it
-        // explicitly from the app locale — the same value LangsysTranslator
-        // uses — so this middleware and `@t` can never disagree about which
-        // language a page is in, and so we never fall through to
-        // Client::getLocale(), which auto-detects from $_SERVER and can
-        // trigger an HTTP call for the project's base locale.
-        $this->client->setLocale($locale);
-
-        try {
-            $translated = $this->client->translatePage(
-                $html,
-                config('langsys.translate_response.category')
-            );
-        } catch (LangsysException $e) {
-            // A translation layer must never be the reason a page 500s. Serve
-            // the untranslated response and hand the failure to the app's
-            // reporter.
-            report($e);
-
-            return null;
-        }
-
-        if (!is_string($translated) || $translated === '') {
-            return null;
-        }
-
-        if ($key !== null) {
-            $this->_store()->put($key, $translated, (int) config('langsys.translate_response.cache.ttl', 3600));
-        }
-
-        return $translated;
-    }
-
-    /**
-     * Keyed by the source HTML rather than the route, so a page whose content
-     * varies by user or state can never serve another request's translation.
-     * That also makes the cache useless for most Laravel pages — a CSRF token
-     * or timestamp changes the hash every render — which is why it ships
-     * disabled. Turn it on only for genuinely static, high-traffic HTML.
-     */
-    private function _cacheKey(string $html, string $locale): ?string
-    {
-        if (!config('langsys.translate_response.cache.enabled')) {
-            return null;
-        }
-
-        return config('langsys.cache.prefix', 'langsys:') . 'page:' . $locale . ':' . sha1($html);
-    }
-
-    private function _store()
-    {
-        return $this->cache->store(config('langsys.cache.store'));
     }
 }

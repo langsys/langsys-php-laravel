@@ -112,7 +112,7 @@ Interpolation itself lives in `langsys/langsys-php`, so Blade, plain PHP, and th
 
 ### Token discovery & flushing
 
-With a write key, phrases that miss the catalog are queued in-memory during the request and flushed to Langsys **after the response is sent** — by the terminable middleware under PHP-FPM, and by a `RequestTerminated` listener under **Octane** (where PHP's shutdown handlers never fire between requests). Read-only keys skip the flush silently. Disable with `LANGSYS_AUTO_FLUSH=false` and flush manually via `app(\Langsys\SDK\Client::class)->flushPendingRegistrations()`.
+With a write key, phrases that miss the catalog are queued in-memory during the request and flushed to Langsys **after the response is sent** — by the terminable middleware under PHP-FPM, and at the end of every **Octane** request and every **queued job**, where the container outlives the unit of work and PHP's shutdown handlers never fire in between. Those same boundaries clear the client's per-request state, so the next request or job never inherits this one's write decision or catalog. Read-only keys skip the flush. You can also flush at a point of your own choosing with `app(\Langsys\SDK\Client::class)->flushPendingRegistrations()`.
 
 ### Livewire
 
@@ -215,7 +215,7 @@ Langsys::client()->translatePage($html);       // full-page HTML translation
 
 ## Configuration reference
 
-See [`config/langsys.php`](config/langsys.php): credentials (`LANGSYS_API_KEY`, `LANGSYS_PROJECT_ID`, `LANGSYS_API_URL`), catalog cache (Laravel store/prefix/TTL), locale-detection sources and persistence, and `auto_flush`.
+See [`config/langsys.php`](config/langsys.php): credentials (`LANGSYS_API_KEY`, `LANGSYS_PROJECT_ID`, `LANGSYS_API_URL`), catalog cache (Laravel store/prefix/TTL), locale-detection sources and persistence, and automatic response translation (`LANGSYS_TRANSLATE_RESPONSE`). `LANGSYS_API_URL` also points the SDK at a local test double; it is read when the client is first resolved, so set it before anything translates.
 
 ## Testing your app
 

@@ -79,8 +79,6 @@ return [
     | boundaries, fragmenting the shared catalog silently.
     |
     | `only`/`except` take Laravel path patterns (`admin/*`); `except` wins.
-    | Caching is keyed by the source HTML, so it is useless for pages carrying a
-    | CSRF token or timestamp — hence disabled by default.
     |
     */
 
@@ -89,24 +87,6 @@ return [
         'category' => env('LANGSYS_TRANSLATE_RESPONSE_CATEGORY'),
         'only'     => [],
         'except'   => [],
-        'cache'    => [
-            'enabled' => (bool) env('LANGSYS_TRANSLATE_RESPONSE_CACHE', false),
-            'ttl'     => (int) env('LANGSYS_TRANSLATE_RESPONSE_CACHE_TTL', 3600),
-        ],
     ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Pending-registration auto flush
-    |--------------------------------------------------------------------------
-    |
-    | Phrases discovered during a request (write keys only) are queued and
-    | flushed to the Langsys API after the response is sent, via the
-    | FlushPendingRegistrations terminable middleware and the Octane
-    | RequestTerminated listener. Disable to flush manually.
-    |
-    */
-
-    'auto_flush' => (bool) env('LANGSYS_AUTO_FLUSH', true),
 
 ];

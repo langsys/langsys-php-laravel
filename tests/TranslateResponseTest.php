@@ -4,7 +4,6 @@ namespace Langsys\Laravel\Tests;
 
 use Illuminate\Http\Request;
 use Langsys\Laravel\Tests\Fakes\FakeClient;
-use Langsys\SDK\Exception\ApiException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -144,36 +143,40 @@ class TranslateResponseTest extends TestCase
     }
 
     /**
-     * An unreachable API must never take the page down — the invariant that
-     * governs every lookup path in this package. The untranslated page is
-     * served intact rather than blanked.
+     * WIRE-4 on the real SDK: with the API unreachable, translatePage() hands
+     * back the source HTML, and that is what is served — not a 500, and not a
+     * blank body.
      */
-    public function testServesTheUntranslatedPageWhenTheApiFails(): void
+    public function testAnUnreachableApiServesTheUntranslatedPage(): void
+    {
+        $this->app->instance(\Langsys\SDK\Client::class, $this->offlineClient());
+
+        $this->get('/page')->assertOk()->assertSee('<p>Save</p>', false);
+    }
+
+    /**
+     * Whatever the SDK returns is served, byte for byte. A result no fallback
+     * could produce: a middleware that substituted the original page, or
+     * guarded the result in any way, would not serve it intact.
+     */
+    public function testServesExactlyWhatTheSdkReturned(): void
     {
         $this->app->instance(\Langsys\SDK\Client::class, new class extends FakeClient {
             public function translatePage($html, $category = null, array $selectorCategories = [], array $params = [])
             {
-                throw new ApiException('Service unavailable', 503);
+                return "\u{2063}sdk:" . $html;
             }
         });
 
-        $this->get('/page')->assertOk()->assertSee('Save', false);
+        $this->assertSame("\u{2063}sdk:<p>Save</p>", $this->get('/page')->assertOk()->getContent());
     }
 
-    /** A client returning nothing usable must not blank the response body. */
-    public function testDoesNotBlankThePageWhenTranslationReturnsEmpty(): void
-    {
-        $this->app->instance(\Langsys\SDK\Client::class, new class extends FakeClient {
-            public function translatePage($html, $category = null, array $selectorCategories = [], array $params = [])
-            {
-                return '';
-            }
-        });
-
-        $this->get('/page')->assertOk()->assertSee('Save', false);
-    }
-
-    public function testCacheIsDisabledByDefaultSoEveryRequestIsTranslated(): void
+    /**
+     * BIND-5: a binding does not cache lookup results. Two identical requests
+     * both reach the SDK, which owns the catalog cache; a translated page kept
+     * here would outlive a translation the SDK had already refreshed.
+     */
+    public function testEveryRequestReachesTheSdk(): void
     {
         $this->get('/page')->assertOk();
         $this->get('/page')->assertOk();
@@ -181,29 +184,20 @@ class TranslateResponseTest extends TestCase
         $this->assertCount(2, $this->fakeClient->translatedPages);
     }
 
-    public function testCachedPagesSkipTheSdkOnRepeatRequests(): void
+    /** translatePage() does not throw. If something does, this middleware must not be the layer that hides it. */
+    public function testDoesNotSwallowAFailureTheSdkLetThrough(): void
     {
-        config()->set('langsys.translate_response.cache.enabled', true);
+        $this->withoutExceptionHandling();
+        $this->app->instance(\Langsys\SDK\Client::class, new class extends FakeClient {
+            public function translatePage($html, $category = null, array $selectorCategories = [], array $params = [])
+            {
+                throw new \Langsys\SDK\Exception\ApiException('Service unavailable', 503);
+            }
+        });
 
-        $this->get('/page')->assertOk()->assertSee('Guardar', false);
-        $this->get('/page')->assertOk()->assertSee('Guardar', false);
+        $this->expectException(\Langsys\SDK\Exception\ApiException::class);
 
-        $this->assertCount(1, $this->fakeClient->translatedPages, 'The second request should be served from cache.');
-    }
-
-    /** Keyed by source HTML, so one locale's translation can never be served for another. */
-    public function testCacheIsKeyedByLocale(): void
-    {
-        config()->set('langsys.translate_response.cache.enabled', true);
-
-        $this->app->setLocale('es-ES');
-        $this->get('/page')->assertOk();
-
-        $this->app->setLocale('fr-FR');
-        $this->get('/page')->assertOk();
-
-        $this->assertCount(2, $this->fakeClient->translatedPages);
-        $this->assertSame('fr-fr', $this->fakeClient->translatedPages[1]['locale']);
+        $this->get('/page');
     }
 
     public function testMiddlewareIsNotAppliedGlobally(): void

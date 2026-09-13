@@ -5,13 +5,13 @@ namespace Langsys\Laravel\Support;
 use Locale;
 
 /**
- * Canonical BCP 47 casing (the JS SDKs' canonicalizeLocale analog):
+ * Canonical BCP 47 casing for Laravel's own locale store:
  * 'es-es' / 'pt_br' → 'es-ES' / 'pt-BR', 'zh-hant-tw' → 'zh-Hant-TW'.
  *
- * The vanilla PHP SDK normalizes locales to lowercase internally
- * (LocaleDetector::normalize), which the Langsys API accepts — but Laravel's
- * app locale and the JS SDKs' initialTranslationsLocale handoff expect the
- * canonical form, so the wrapper canonicalizes at those boundaries.
+ * Only DetectLocale uses it, for app()->setLocale(). Nothing handed to a
+ * Langsys SDK goes through it: both the PHP and the JS SDK identify a locale
+ * by lowercase `xx-yy` (WIRE-3), so every SDK boundary uses
+ * LocaleDetector::normalize() instead.
  */
 class LocaleFormatter
 {

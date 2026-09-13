@@ -3,6 +3,76 @@
 Running list of deferred work and design decisions for
 `langsys/langsys-php-laravel`, so the context isn't lost between sessions.
 
+## 838: conformance to SDK spec 8.0.1
+
+Graded row by row in `CONFORMANCE.md`. The design decisions and deferred work behind those rows are recorded here.
+
+### Release gate — the core is untagged, and the constraint has to move at publication
+
+This branch depends on the 838 `langsys/langsys-php` core: `resetRequestState()`, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
+
+- **CI fails on this branch by design.** It installs from Packagist. Against v1.3.1, the boundary tests hit an undefined method, and the delegation probes find no fallback where the wrapper used to have one.
+- **At publication**, the constraint moves to the core's 838 tag and the local path repository (below) goes. The operator publishes every SDK at once, after all of them are green.
+
+### Decided: the local path repository stays uncommitted
+
+For local development, `composer.json` carries a `repositories` path entry pointing at `../langsys-php-sdk` with `symlink: true`, plus a `versions` override pinning `langsys/langsys-php` to `1.3.1`. It is never committed, and the mesh's end-of-day sweep carries it as a standing exception.
+
+- **The path is machine-specific.**
+- **The `versions` override is a local fiction.** The checkout sits on an untagged feature branch past v1.3.1, and without the override it resolves as `dev-*` and fails `^1.3`. Committed, it would let anyone who clones this repo beside their own `langsys-php-sdk` build silently against whatever uncommitted state that tree holds, believing they had the Packagist release.
+- **Consumers are unaffected either way.** Composer ignores a dependency's `repositories`, so the hazard is to developers of this package, not users of it.
+- **It is also a live integration check.** The SDK's uncommitted edits run in this suite without a reinstall, so a core change that breaks the wrapper shows up here before it is tagged.
+
+### Pending the operator's ruling: three breaking changes
+
+These three are in the code on this branch because the binding rules call for them, but **none is accepted**. The operator holds the sign-off and rules before anything publishes. Each restore path below is written in advance, so a reversal is a known edit with known consequences for `CONFORMANCE.md`, not a rediscovery.
+
+**1. The `TranslateResponse` page cache was removed rather than keyed by project.** The review finding was CACHE-1: the cache key had no project id. Adding one would have fixed that and still left BIND-5, which is flat: *a binding does not cache lookup results*. The cache also carried a staleness the SDK's does not — a page cached for its TTL kept serving a translation after the SDK's catalog had refreshed — and a cache hit fed no registration lane at all (GATE-7). It shipped disabled, documented as useless for pages carrying a CSRF token.
+
+*Restore path, as a BIND-5 waiver:*
+- Bring back `translate_response.cache.enabled` / `.ttl` and the `CacheFactory` dependency from `main`'s `TranslateResponse`.
+- **Key by project:** `prefix . project_id . ':page:' . locale . ':' . sha1(html)`. The old key without the project id fails CACHE-1 again.
+- Add both keys to `BindingBoundaryTest::CONFIG_SURFACE`, classified as waived under BIND-5.
+- Regrade BIND-5 as `waived`, citing the operator's recorded agreement, and record GATE-7's cache-hit limit.
+- Narrow `testEveryRequestReachesTheSdk` to the cache-disabled case, and restore cache-on tests with a two-project CACHE-1 case.
+
+**2. `auto_flush` was removed.** It was product configuration the core does not define (BIND-4), and under PHP-FPM it never stopped a flush, because the core's shutdown handler sends the queue regardless.
+
+*Restore path:*
+- Bring back the key.
+- Guard the **flush** in `FlushPendingRegistrations::terminate()` and in `_endRequestScope()` with it. **Never guard `resetRequestState()`**: the reset must stay unconditional, or GATE-3 and SRV-2 regress exactly as they did in the old Octane listener.
+- Add the key to `CONFIG_SURFACE`.
+- BIND-4 is then no longer green unless the operator records a waiver.
+
+**3. `initialTranslationsLocale` went lowercase** (`es-es`, was `es-ES`). Both SDKs identify a locale in that form (WIRE-3), and the 838 JS core canonicalizes whatever it is handed, so the hand-off behaves the same either way. Only an app reading the prop for something else sees a difference.
+
+*Keep-`es-ES` path:*
+- In `InertiaSsrProps::share()`, hand `LocaleFormatter::canonicalize(...)` as the prop, but keep `getTranslations(LocaleDetector::normalize(...))`: the core keys its catalog by the string it is handed.
+- Revert the expectations of M15's three tests.
+- Narrow WIRE-3's "every SDK boundary is lowercase" to "every PHP-core boundary", and restore the Inertia use in `LocaleFormatter`'s docblock.
+- WIRE-3 and SRV-4 stay green.
+
+### Decided: failure handling is delegated; one site is not
+
+The wrapper used to catch `LangsysException` and fall back in `LangsysTranslator`, `TranslateResponse`, `FlushPendingRegistrations` and the Octane listener. Against the 838 core each catch is unreachable: `translate()`, `translatePage()` and `flushPendingRegistrations()` catch every `\Throwable` themselves (measured with a throwing cache and an unreachable API). They are gone, and tests pin that the wrapper does not swallow what the SDK lets through.
+
+**`InertiaSsrProps::share()` keeps a catch, because nothing upstream can own it.** `getTranslations()` throws by design — answering an outage with `[]` would cache an empty catalog — and `share()` sits on every Inertia request. On failure it hands no seed rather than an empty one: the JS SDK marks a seeded locale loaded and skips its fetch for 60 seconds.
+
+### Open, upstream — raised through the Reviewer
+
+- **`Client::translate()` and `getTranslations()` do not normalize the locale they are handed (WIRE-3).** Measured: with an `es-es` catalog cached, `translate('Save', 'es-ES')` reads `translations_<project>_es-ES`, misses, and goes to the network. Only `setLocale()` normalizes. The wrapper normalizes before those calls, which is a binding compensating for a core gap. The fix belongs in the core, after which the wrapper's calls become redundant rather than load-bearing.
+- **The core rows HINT-2 as `n/a (profile: server)`, inside its `HINT-1 … HINT-8` range.** HINT-2's profile *is* `server` — "server SDKs never report" — so it binds the core, and non-participation is testable, as GRANT's `X-Write-Grant` clause is.
+- **The core logs to a `NullLogger` unless its own logging is enabled.** In a default Laravel app, every failure the core "logs" — a lookup that degraded, a flush that could not send — is recorded nowhere. REG-10 asks for *always log*, and the spec's Open section says server SDKs MUST at minimum log a failed shutdown flush.
+
+### Deferred: route the core's logger to a Laravel log channel
+
+The core accepts a PSR-3 `logger` option, and Laravel's log manager is one. Passing a configured channel through would be pure shape adaptation (BIND-1), and it would make the core's diagnostics visible where a Laravel developer looks. It is deferred rather than done because it changes log volume — the core logs a debug line per catalog hit — which is a product decision, and it should follow the core settling its own REG-10 default rather than precede it.
+
+### Known limits
+
+- **Octane is exercised through a stand-in event class.** Octane itself needs a Swoole, RoadRunner or FrankenPHP server, so it is not installed. The provider listens by class name, which is what the test pins. Octane's `TaskTerminated` and `TickTerminated` are not listened to: without the Octane source on hand, their names and semantics were not verified.
+- **`LaravelCacheAdapter`'s key index is read-modify-write.** Two concurrent first writes can each drop the other's key from the index, and `clear()` then misses that key until it expires. This predates this branch, and no rule covers it.
+
 ## Coverage model: explicit tagging vs. automatic translation
 
 **What we built:** the SDK translates only strings you explicitly wrap in

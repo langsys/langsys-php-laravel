@@ -62,6 +62,7 @@ class FakeClient extends Client
     public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null, array $params = [])
     {
         $locale = $locale !== null ? LocaleDetector::normalize($locale) : $this->getLocale();
+        $category = $this->normalizeCategory($category);
 
         if ($locale === null) {
             return $this->getInterpolator()->interpolate($phrase, $params, null);

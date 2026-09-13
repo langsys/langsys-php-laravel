@@ -6,72 +6,75 @@ use Langsys\Laravel\LangsysTranslator;
 use Langsys\Laravel\Tests\Fakes\FakeClient;
 use Langsys\SDK\Exception\ApiException;
 
+/**
+ * The translator chooses a locale and hands everything else to the SDK. These
+ * hold it to that: what the SDK returns is what the caller gets, and a failure
+ * the SDK lets through is not quietly repaired here. The SDK's own fallback
+ * (WIRE-4, CAT-2) is the one the fleet tests; a second copy in this class
+ * could only drift from it.
+ */
 class LangsysTranslatorTest extends TestCase
 {
     /**
-     * The API returns null for a phrase that exists in the project but has no
-     * translation yet, and php-sdk builds without the null guard pass it
-     * through (their empty check is `$value !== ''`, which null passes).
-     * The translator must fall back to the phrase, not throw a TypeError.
+     * A result no fallback could produce. It carries the phrase's raw
+     * `{name}`, so a translator that substituted the source phrase,
+     * interpolated the result or trimmed it would not hand it back intact.
      */
-    private function clientReturningNull(): FakeClient
+    public function testReturnsExactlyWhatTheSdkReturned(): void
     {
-        return new class extends FakeClient {
+        $client = new class extends FakeClient {
             public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null, array $params = [])
             {
-                return null;
+                return "\u{2063}sdk:{$phrase}:{$locale}\u{2063}";
             }
         };
-    }
-
-    public function testFallsBackToThePhraseWhenTheClientReturnsNull(): void
-    {
-        $translator = new LangsysTranslator($this->clientReturningNull());
-
-        $this->assertSame('Welcome', $translator->translate('Welcome', null, [], 'es-ES'));
-    }
-
-    public function testInterpolatesTheFallbackWhenTheClientReturnsNull(): void
-    {
-        $translator = new LangsysTranslator($this->clientReturningNull());
 
         $this->assertSame(
-            'Welcome Sarah',
-            $translator->translate('Welcome {name}', 'Home', ['name' => 'Sarah'], 'es-ES')
+            "\u{2063}sdk:Welcome {name}:es-es\u{2063}",
+            (new LangsysTranslator($client))->translate('Welcome {name}', 'Home', ['name' => 'Sarah'], 'es-ES')
         );
     }
 
-    /**
-     * An unreachable or refusing API (timeout, 404 on an unseeded project,
-     * 401 on a revoked key) surfaces as a LangsysException from the SDK. The
-     * translator must degrade to the base-language phrase — a translation
-     * layer should never be the reason a page 500s.
-     */
-    private function clientThrowing(): FakeClient
+    /** The SDK does not throw from translate(). If something does, this class must not be the layer that hides it. */
+    public function testDoesNotSwallowAFailureTheSdkLetThrough(): void
     {
-        return new class extends FakeClient {
+        $client = new class extends FakeClient {
             public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null, array $params = [])
             {
                 throw new ApiException('Invalid request', 404);
             }
         };
+
+        $this->expectException(ApiException::class);
+
+        (new LangsysTranslator($client))->translate('Welcome', null, [], 'es-ES');
     }
 
-    public function testFallsBackToThePhraseWhenTheApiIsUnavailable(): void
+    /**
+     * WIRE-3, observed on the real SDK: Client::translate() keys its catalog by
+     * the locale string it is handed, verbatim, so an `es-ES` lookup misses an
+     * `es-es` catalog and goes to the network. Every host spelling must reach
+     * the one entry.
+     */
+    public function testEveryHostSpellingOfALocaleReadsTheSameCatalog(): void
     {
-        $translator = new LangsysTranslator($this->clientThrowing());
+        $translator = new LangsysTranslator($this->offlineClient(['es-es' => ['UI' => ['Save' => 'Guardar']]]));
 
-        $this->assertSame('Welcome', $translator->translate('Welcome', null, [], 'es-ES'));
+        foreach (['es-es', 'es-ES', 'es_ES', 'ES-es'] as $hostLocale) {
+            $this->assertSame('Guardar', $translator->translate('Save', 'UI', [], $hostLocale), "Host locale {$hostLocale} missed the catalog.");
+        }
     }
 
-    public function testInterpolatesTheFallbackWhenTheApiIsUnavailable(): void
+    /**
+     * No-category is the SDK's to name — `__uncategorized__` is its internal
+     * lookup namespace (WIRE-3, CID-2), so this package never spells it.
+     * Observed through the real SDK rather than asserted on what was passed.
+     */
+    public function testAnUncategorizedPhraseResolvesThroughTheSdksOwnNamespace(): void
     {
-        $translator = new LangsysTranslator($this->clientThrowing());
+        $translator = new LangsysTranslator($this->offlineClient(['es-es' => ['__uncategorized__' => ['Save' => 'Guardar']]]));
 
-        $this->assertSame(
-            'Welcome Sarah',
-            $translator->translate('Welcome {name}', 'Home', ['name' => 'Sarah'], 'es-ES')
-        );
+        $this->assertSame('Guardar', $translator->translate('Save', null, [], 'es-ES'));
     }
 
     /**
@@ -103,5 +106,18 @@ class LangsysTranslatorTest extends TestCase
             $client->queuedPhrases,
             'The catalog must receive the placeholder-bearing phrase, not the interpolated string.'
         );
+    }
+
+    /**
+     * WIRE-4 on the real SDK: with nothing cached and the API unreachable, the
+     * phrase renders in the base language with its params applied, and nothing
+     * is queued — a failed catalog fetch cannot tell a miss from a hit.
+     */
+    public function testAnUnreachableApiRendersTheSourcePhraseAndQueuesNothing(): void
+    {
+        $client = $this->offlineClient();
+
+        $this->assertSame('Welcome Sarah', (new LangsysTranslator($client))->translate('Welcome {name}', 'Home', ['name' => 'Sarah'], 'es-ES'));
+        $this->assertSame([], $client->getPendingPhrases());
     }
 }
