@@ -60,9 +60,13 @@ The wrapper used to catch `LangsysException` and fall back in `LangsysTranslator
 
 ### Open, upstream — raised through the Reviewer
 
-- **`Client::translate()` and `getTranslations()` do not normalize the locale they are handed (WIRE-3).** Measured: with an `es-es` catalog cached, `translate('Save', 'es-ES')` reads `translations_<project>_es-ES`, misses, and goes to the network. Only `setLocale()` normalizes. The wrapper normalizes before those calls, which is a binding compensating for a core gap. The fix belongs in the core, after which the wrapper's calls become redundant rather than load-bearing.
-- **The core rows HINT-2 as `n/a (profile: server)`, inside its `HINT-1 … HINT-8` range.** HINT-2's profile *is* `server` — "server SDKs never report" — so it binds the core, and non-participation is testable, as GRANT's `X-Write-Grant` clause is.
-- **The core logs to a `NullLogger` unless its own logging is enabled.** In a default Laravel app, every failure the core "logs" — a lookup that degraded, a flush that could not send — is recorded nowhere. REG-10 asks for *always log*, and the spec's Open section says server SDKs MUST at minimum log a failed shutdown flush.
+Status as of core `fdbf84e`, whose conformance file is canonical:
+
+- **`Client::translate()` and `getTranslations()` do not normalize the locale they are handed (WIRE-3) — acknowledged, still unfixed.** The core reproduced it and grades WIRE-3 `partial`; re-measured here at `fdbf84e`, an `es-ES` lookup still misses an `es-es` catalog. The wrapper normalizes before those calls, which is a binding compensating for a core gap. Once the core fixes it, the wrapper's calls become redundant rather than load-bearing.
+- **HINT-2 was mis-graded — resolved.** The core regraded it `implemented`, with an absence scan of its own.
+- **The core logs to a `NullLogger` unless its own logging is enabled — acknowledged.** Core REG-10 is `partial`, with the *always log* half unmet. In a default Laravel app every failure the core "logs" is recorded nowhere.
+- **REG-8's long-lived amplification — reproduced by the core**, and held there for the operator's clarification on backoff in per-request servers.
+- **Automatic mode inherits the core's page-path gaps.** TOK-1 to TOK-4, MARK-1, MARK-2 and CID-4 are `partial` in the core because they are not proven — or are measured failing — on `translatePage()`, which `TranslateResponse` uses for every page. Tagged mode does not take that route.
 
 ### Deferred: route the core's logger to a Laravel log channel
 
