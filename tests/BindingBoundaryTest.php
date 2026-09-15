@@ -45,6 +45,8 @@ class BindingBoundaryTest extends TestCase
         'pagetranslator', 'markuptokenizer', 'interpolator', 'getinterpolator', 'messageformatter',
         'preg_replace', 'preg_match', 'mb_ereg_replace', '__uncategorized__', 'data-ls-', 'data-langsys-',
         'getpendingphrases', 'getpendingcontentblocks', 'translatecontentblock',
+        // MSG-2's split of a size failure by field type is the core's (MessageCodes::forBound).
+        'too_short', 'too_long', 'too_small', 'too_large', 'too_few', 'too_many',
     ];
 
     /**
@@ -60,6 +62,7 @@ class BindingBoundaryTest extends TestCase
         'Langsys\\Laravel\\Http\\Middleware\\TranslateResponse'         => ['__construct', 'handle'],
         'Langsys\\Laravel\\LangsysServiceProvider'                      => ['boot', 'register'],
         'Langsys\\Laravel\\LangsysTranslator'                           => ['__construct', 'client', 'translate'],
+        'Langsys\\Laravel\\Messages\\RuleWording'                       => ['classification', 'codesFor'],
         'Langsys\\Laravel\\Support\\InertiaSsrProps'                    => ['share'],
         'Langsys\\Laravel\\Support\\LocaleFormatter'                    => ['canonicalize'],
     ];
