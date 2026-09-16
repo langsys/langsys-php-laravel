@@ -66,6 +66,20 @@ class RuleWordingTest extends TestCase
         }
     }
 
+    /**
+     * MSG-2: a size rule's code follows the field's type, so one rule produces several codes. The
+     * mapping itself is the core's (`MessageCodes::forBound`); what is pinned here is that this
+     * table asks for every type a Laravel field can have, and for both sides where the rule does
+     * not say which one failed.
+     */
+    public function testASizeRuleCoversEveryFieldTypeAndSide(): void
+    {
+        $this->assertSame(['too_short', 'too_small', 'too_few'], RuleWording::codesFor('min'));
+        $this->assertSame(['too_long', 'too_large', 'too_many'], RuleWording::codesFor('max'));
+        $this->assertSame(['too_short', 'too_small', 'too_few', 'too_long', 'too_large', 'too_many'], RuleWording::codesFor('between'));
+        $this->assertSame(['too_short', 'too_long'], RuleWording::codesFor('digits_between'), 'A digit count is measured as text.');
+    }
+
     /** @return array<string, string|array<string, string>> rule => its English line, or its size variants */
     private function _lines(): array
     {

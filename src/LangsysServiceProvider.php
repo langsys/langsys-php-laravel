@@ -3,15 +3,18 @@
 namespace Langsys\Laravel;
 
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Langsys\Laravel\Cache\LaravelCacheAdapter;
+use Langsys\Laravel\Http\Middleware\AttachServerMessages;
 use Langsys\Laravel\Http\Middleware\DetectLocale;
 use Langsys\Laravel\Http\Middleware\FlushPendingRegistrations;
 use Langsys\Laravel\Http\Middleware\TranslateResponse;
+use Langsys\Laravel\Messages\MessageValidator;
 use Langsys\SDK\Client;
 
 class LangsysServiceProvider extends ServiceProvider
@@ -24,8 +27,9 @@ class LangsysServiceProvider extends ServiceProvider
             $config = $app['config']['langsys'];
 
             return new Client($config['api_key'], $config['project_id'], [
-                'api_url' => $config['api_url'],
-                'cache'   => new LaravelCacheAdapter(
+                'api_url'           => $config['api_url'],
+                'messages_category' => $config['messages']['category'],
+                'cache'             => new LaravelCacheAdapter(
                     $app['cache']->store($config['cache']['store']),
                     $config['cache']['prefix'],
                     $config['cache']['ttl'],
@@ -46,6 +50,7 @@ class LangsysServiceProvider extends ServiceProvider
         $this->_registerBladeDirective();
         $this->_registerMiddlewareAliases();
         $this->_registerLongLivedBoundaries();
+        $this->_registerServerMessages();
     }
 
     private function _registerBladeDirective(): void
@@ -70,6 +75,44 @@ class LangsysServiceProvider extends ServiceProvider
             EncryptCookies::class,
             fn (EncryptCookies $middleware) => $middleware->disableFor(config('langsys.locale.cookie'))
         );
+    }
+
+    /**
+     * In migrate mode Laravel builds this package's validator, so a failure is rendered from the
+     * rule that failed rather than from a lang file. In keep mode nothing is installed at all and
+     * Laravel answers exactly as it would without this package.
+     */
+    private function _registerServerMessages(): void
+    {
+        if (config('langsys.localization') !== 'migrate') {
+            return;
+        }
+
+        $this->app['validator']->resolver(
+            fn ($translator, $data, $rules, $messages, $attributes) => new MessageValidator($translator, $data, $rules, $messages, $attributes)
+        );
+
+        // Through the kernel, not the router: the kernel writes the groups onto the router when
+        // it is constructed, which happens after this provider boots and would drop anything
+        // pushed straight to the router. Appended, so it wraps the route's own stack and sees the
+        // response Laravel's pipeline rendered from a ValidationException, validator attached.
+        $this->app->booted(function () {
+            if (!$this->app->bound(HttpKernel::class)) {
+                return;
+            }
+
+            $kernel = $this->app->make(HttpKernel::class);
+
+            if (!method_exists($kernel, 'appendMiddlewareToGroup') || !method_exists($kernel, 'getMiddlewareGroups')) {
+                return;
+            }
+
+            // Only groups the application actually defines: the kernel throws on any other, and an
+            // application is free to ship without an `api` group.
+            foreach (array_intersect(['web', 'api'], array_keys($kernel->getMiddlewareGroups())) as $group) {
+                $kernel->appendMiddlewareToGroup($group, AttachServerMessages::class);
+            }
+        });
     }
 
     /**

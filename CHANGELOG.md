@@ -19,6 +19,19 @@ These three are in the code at this tip because the binding rules call for them,
 - **Removal of `translate_response.cache` / `LANGSYS_TRANSLATE_RESPONSE_CACHE` / `LANGSYS_TRANSLATE_RESPONSE_CACHE_TTL` — breaking.** A binding does not cache lookup results (BIND-5). The cached page was keyed without the project id, so two projects on one host shared entries (CACHE-1). It also served a translation for its whole TTL after the SDK's own catalog had refreshed. It shipped disabled, and the SDK still caches the catalog. The alternative on the table: restore it, keyed by project id, as a BIND-5 waiver carrying the operator's recorded agreement.
 - **`InertiaSsrProps::share()` hands `initialTranslationsLocale` as lowercase `xx-yy`** (`es-es`, was `es-ES`). Both SDKs identify a locale in that form (WIRE-3), and the JS SDK canonicalizes whatever it is handed to it, so the hand-off itself behaves the same. Only an app that reads the prop for something else sees the difference. The alternative on the table: keep `es-ES`.
 
+### Added — server messages, in progress
+
+Spec 8.1.0's MSG family, against the core's `Langsys\SDK\Messages`. Validation failures become entries a client can translate, without an application writing anything of ours.
+
+- **`langsys.localization` (`LANGSYS_LOCALIZATION`)** picks the mode. **`keep` is the default and changes nothing**: Laravel's validator, Laravel's wording, Laravel's 422 body, and nothing sent to Langsys.
+- **`migrate`** builds an entry from each rule that failed — never by reading back the rendered message — with the field's label written into Laravel's own sentence and values kept outside it as `{name}` markers, so each sentence is translated whole and agrees.
+- **The entries travel beside Laravel's own error body**, under `langsys.messages.response_key` (default `langsys_errors`), and are flashed to the session across a redirect. `message` and `errors` keep their shape and their text.
+- **The server never emits Langsys-translated text here.** Entries carry source text; a client renders the translation from `entry.template` and falls back to `entry.message` (MSG-5).
+- **A template the catalog lacks is registered after the response**, under `langsys.messages.category` (default `Errors`).
+- Laravel's wording is used verbatim, and every one of its 107 validation rules is classified; a Laravel upgrade that adds a rule or a placeholder fails the suite rather than sending an unclassified message.
+
+Not built yet: the Inertia hand-off, `__()` and `trans()` in migrate mode, `fill` mode, and the `langsys:messages` command.
+
 ### Changed
 
 - **Failure handling is the SDK's alone.** `LangsysTranslator`, `TranslateResponse` and `FlushPendingRegistrations` no longer catch or fall back themselves: the SDK already catches every failure and degrades to source text, so those copies could only drift from it. A lookup failure is logged through the SDK's logger rather than reported through Laravel's exception handler.

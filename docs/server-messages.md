@@ -17,7 +17,7 @@ These are the operator's requirements, and every decision below is measured agai
 
 ## 2. Two modes, one switch
 
-A single setting chooses the mode: `langsys.localization`, set from `LANGSYS_LOCALIZATION`, either `keep` or `migrate`. **The default is `keep`.**
+A single setting chooses the mode: `langsys.localization`, set from `LANGSYS_LOCALIZATION`: `keep`, `fill` or `migrate`. **The default is `keep`.**
 
 ### `keep` — Laravel stays authoritative
 
@@ -25,18 +25,37 @@ The package touches nothing about localization or validation. It installs no val
 
 *Why keep mode emits nothing:* an entry carries a template worded by the Langsys wording table. If keep mode emitted entries, a frontend that rendered them would show wording different from the application's own lang files — the silent hybrid requirement 2 rules out.
 
+### `fill` — Laravel first, Langsys for the gaps
+
+Laravel's lang files answer wherever they have a line for the requested locale. Where they do not — a JSON key with no entry in that locale, or a group key that only the fallback locale has — Langsys is asked for the sentence: it renders the translation when it has one, and otherwise shows the source text and registers it. **Validation messages are the exception**: they are never translated on the server, in any mode, for the reason in §3.0.
+
+This is a hybrid, deliberately, and an explicit one. **It only acts where Laravel had no translation to give**, so no key changes hands silently: a line an application has translated keeps coming from that line.
+
+Two consequences shape the implementation:
+
+- **Laravel's own hook is not enough.** `handleMissingKeysUsing()` fires only when a key is missing from *every* locale. When `es` lacks a line that `en` has, Laravel quietly serves the English one and the hook never runs, so fill mode needs the translator subclass of §3.2 to see a gap in the requested locale.
+- **Validation lines cannot be filled as plain lines.** Laravel translates `The :attribute field is required.` first and substitutes the label after, which is the frozen-agreement bug MSG-3 exists to remove. So when a validation line is missing for the requested locale, fill mode builds the message the §3.1 way — label written in, then looked up — rather than translating the line with its placeholder.
+
 ### `migrate` — the Langsys zero-file model
 
 - `__()`, `trans()`, `@lang` and `trans_choice()` are answered from the Langsys catalog (§3.2).
-- Validation messages are built from the rule that failed, with the label written in, then translated whole (§3.1).
+- Validation messages are built from the rule that failed, with the label written in, and registered for translation, while Laravel's own rendering is left alone (§3.1).
 - Entries are attached to responses in Laravel's native envelope, carried across redirects, and shared with Inertia (§5).
 - Phrases the catalog lacks are registered after the response, under a write key only, through the existing flush path.
 
-**Migrate mode and automatic mode never run together.** `TranslateResponse` would re-walk text that migrate mode already translated and register the translations as source phrases — the hazard already documented for `@t`. In migrate mode the middleware declines to run and reports it once.
+**Migrate mode and automatic mode never run together.** `TranslateResponse` would re-walk text `__()` already translated in migrate mode and register the translations as source phrases — the hazard already documented for `@t`. In migrate mode the middleware declines to run and reports it once.
 
 `langsys.localization` decides which of Laravel's own services answers Laravel's localization calls. It does not change what the core does once it is asked. It is recorded under BIND-4 as framework wiring, for the Reviewer to rule on.
 
 ## 3. Migrate mode
+
+### 3.0 The server never emits Langsys-translated text as part of this feature
+
+**Operator ruling, 2026-09-15.** The server registers source phrases, the API machine-translates them, and the client renders `entry.template` through `t()`, falling back to `entry.message` (MSG-5). `message` is the base-locale fill, never a translation. So nothing Langsys translated leaves the server as part of server messages: not an entry's `message`, not the 422 body, not an Inertia prop.
+
+*Why:* translated text where every reader expects source text breaks this feature's own flow, and the first reader it breaks is a client SDK — it looks the string up, misses, because the catalog is keyed by source, and registers a translation as a new phrase.
+
+This is what separates a server message from an ordinary phrase. `t()`, `@t` and `__()` do translate on the server, because the client never needs their source. A server message carries its source to the client by design.
 
 ### 3.1 Validation messages — MSG-9, MSG-10, MSG-11
 
@@ -59,8 +78,8 @@ The package touches nothing about localization or validation. It installs no val
 
    Laravel's case variants — `:Attribute`, `:ATTRIBUTE` — write the label in with the same casing. A tripwire test fails when the installed Laravel has a rule or placeholder the table does not classify, so an upgrade cannot quietly send an unclassified rule.
 4. **Code** (MSG-2). The code comes from the shared vocabulary, per rule. Size rules pick the side of the bound and the field type, so a string is `too_short`/`too_long`, a number `too_small`/`too_large`, a list `too_few`/`too_many`. `between` and `size` pick the side by comparing the value against the rule's parameters — structure, not text. The core helper for this is *pending* (`forBound`).
-5. **Entry.** `ServerMessage::make($code, $template, $params, $field)`, from the core; `$field` is Laravel's dotted attribute. The message placed in Laravel's `MessageBag` is `$client->translateMessage($entry, app()->getLocale())`: the translated whole sentence, or the filled source template on a miss, which the core queues for registration after the response. That is MSG-8 for every validation message.
-6. **Laravel's surface does not change.** `$errors`, `@error`, `$validator->errors()`, the 422 `errors` map and Livewire's error bag all hold translated strings, and they get them through Laravel's own code paths.
+5. **Entry.** `ServerMessage::make($code, $template, $params, $field)`, from the core; `$field` is Laravel's dotted attribute. The entry is recorded, and `$client->emitMessage($entry)` registers its template when the catalog lacks it — after the response, on the existing flush path, so the request is never blocked (MSG-8). Laravel's message bag is not rewritten.
+6. **Laravel's surface does not change, and neither does its text.** `$errors`, `@error`, `$validator->errors()`, the 422 `errors` map and Livewire's error bag keep Laravel's own sentences, in the source language (§3.0). What migrate mode adds is the entries beside them, and registration of any template the catalog lacks.
 
 **Rule objects and closures.** A `ValidationRule` that calls `$fail('The :attribute must be uppercase.')` fails under its class name, with text the author wrote. Its template is that text with the label written in, and its code is `invalid` — the vocabulary has no code for an application's own rule, and a code derived from a class name would change on rename, which MSG-2 forbids. Built-in rule objects (`Password`, `Enum`, and the `Rules\*` that stringify) are worded as the rule they stand for. `ValidationException::withMessages()` carries text and no rule, so it becomes `code: invalid` with that text as the template (MSG-9).
 
@@ -89,15 +108,17 @@ What that means for an application:
 - **Markers are only for values** — numbers, dates, formats, raw input. `The password field must be at least {min} characters.` is one phrase for every minimum. A language that inflects around the number does it in ICU (MSG-11).
 - **One case stays open:** a non-translatable proper noun that governs agreement, such as a person's name in a message. Its fix waits on gender-select (#827), and the plan records it rather than working around it.
 
+**Enumeration has no exceptions.** Laravel's wording stays exactly as Laravel writes it, including the word "field", so a Spanish sentence anchors its agreement on *campo* rather than on the label. That is correct, if wooden, and it is not a reason to skip enumerating: the label is written into every sentence and one phrase is registered per field, for every rule. A shortcut that kept `:attribute` as a placeholder wherever the wording happened to make agreement safe would behave differently from every other rule, break the moment the wording changed, and put a translatable value in a marker, which MSG-3 forbids outright.
+
 Keep mode leaves `:attribute` exactly as Laravel has it, agreement problem included. That is what "keeps working exactly as it is" means.
 
 ## 5. Where entries go — MSG-1, MSG-12
 
 The entry is fixed: `{field?, code, message, template, params?}`. The envelope stays Laravel's own.
 
-- **JSON 422.** `{message, errors}` keeps its shape, and `errors` now holds translated strings. The entries go beside them under one configured key, `langsys.messages.response_key`, default `langsys_errors`. A response middleware, appended to the `web` and `api` groups in migrate mode only, reads the `ValidationException` Laravel's pipeline attaches to the response (`$response->exception`), and takes the entries from its validator.
-- **Redirects.** For a form that fails and redirects, the entries are flashed to the session under the same key, beside Laravel's own `errors` bag. Blade needs nothing: `$errors` already holds translated text.
-- **Inertia (MSG-12).** When `inertiajs/inertia-laravel` is installed, the provider shares the flashed entries as a page prop under the same key, so the destination page's JS SDK can render them through MSG-5. Inertia's own `errors` prop is untouched, and already translated.
+- **JSON 422.** `{message, errors}` keeps its shape, and `errors` keeps Laravel's own text in the source language. The entries go beside them under one configured key, `langsys.messages.response_key`, default `langsys_errors`. A response middleware, appended to the `web` and `api` groups in migrate mode only, reads the `ValidationException` Laravel's pipeline attaches to the response (`$response->exception`), and takes the entries from its validator.
+- **Redirects.** For a form that fails and redirects, the entries are flashed to the session under the same key, beside Laravel's own `errors` bag. A Blade page rendering `$errors` shows the source language; a page with a JS SDK renders the entries.
+- **Inertia (MSG-12).** When `inertiajs/inertia-laravel` is installed, the provider shares the flashed entries as a page prop under the same key, so the destination page's JS SDK can render them through MSG-5. Inertia's own `errors` prop is untouched, and carries source text.
 - **Category (MSG-6).** `langsys.messages.category`, default `Errors`, is passed straight to the core's `messages_category`. Rendering, runtime registration and the build-time command all use it.
 - **Not yet planned: system messages** — `abort()`, authorization and HTTP exceptions. Their text is not declared anywhere the command can list it. They are a later phase, and would reach the same key as text-only entries.
 
@@ -119,13 +140,13 @@ The entry is fixed: `{field?, code, message, template, params?}`. The envelope s
 Each step is red-first: the test fails against the tree before the change.
 
 1. **Wording table and normalizer** (MSG-9, MSG-10, MSG-11): the classification of Laravel's `validation.php`, with the upgrade tripwire, and entries built from a failed validator.
-2. **Validator hook** in migrate mode, translated `MessageBag` strings, and **a keep-mode test that responses are byte-identical** with and without the package.
+2. **Validator hook** in migrate mode, entries recorded and templates registered, and **a keep-mode test that responses are byte-identical** with and without the package.
 3. **Envelope** (MSG-1): JSON, redirect flash and Inertia share (MSG-12), with Inertia installed as a dev dependency for the tests.
 4. **Migrate-mode translator** for `__()`, `trans()`, `@lang` and `trans_choice()`.
 5. **`langsys:messages`** (MSG-7) and its sources.
 6. **`CONFORMANCE.md`** re-derived against blob `f8ff6e1e`, all 91 ids, with MSG-1 to MSG-12 rowed and the core rows delegated to PHP's. Mutations run in a `git worktree`.
 
-Steps 1, 2 and 4 depend only on the core's `ServerMessage`, `translateMessage()` and the category option; steps 5 and 6 need the rest of the core API.
+Steps 1, 2 and 4 depend only on the core's `ServerMessage`, `emitMessage()` and the category option; steps 5 and 6 need the rest of the core API.
 
 ## 8. Decisions and open questions
 
@@ -134,6 +155,14 @@ Steps 1, 2 and 4 depend only on the core's `ServerMessage`, `translateMessage()`
 - **Migrate-mode wording is Laravel's own English**, read from the installed framework's `validation.php`, so all 107 rules have wording and the defaults are Laravel's defaults. When a Laravel release rewords a line, that sentence becomes a new phrase: the command lists it, `--register` registers it, and it is translated fresh.
 - **Importing existing translations is deferred.** Part 2 documents what carries over and what is translated fresh. An import command waits for the core to offer bulk registration with translations.
 - **System messages are a later phase** (§5).
+
+**Decided by the operator, 2026-09-15:**
+- **The server never emits Langsys-translated text as part of server messages** (§3.0). An earlier draft of this plan, and the first implementation, put the translated sentence into Laravel's message bag. Both are corrected, and a test pins it.
+- **Wording stays Laravel's own, unchanged**, including the word "field". Dropping it would let each label govern agreement in translation, but it would also move away from Laravel's defaults, and the gain is readability rather than correctness.
+- **Enumeration is unconditional** (§4). No rule, and no phrasing, is exempt.
+- **`fill` is a third mode** (§2), explicit and gap-only.
+- **The client-side registration hazard is raised, and ruled on.** A client handed already-translated text can register it as a new source phrase, because the catalog is keyed by source. The fix is fleet-wide: the TS core gets a base-locale registration gate as a setting defaulting to off, and producers emit an "already resolved" marker — a DOM attribute for server-rendered hosts, a shape for strings in JSON props, with TypeScript owning both. This package consumes that marker wherever it renders translated text: `t()`, `@t`, and `__()` gaps in fill mode. Server messages need none of it, since entries carry source text and the client renders it.
+- **Blade-only pages in migrate mode are not ruled yet.** A page with no JS SDK shows source-language validation messages, because there is no client to render the translation. That behaviour stands as documented, and server-side validation translation is not to be built until the operator rules; the marker above is what would make it safe if it comes.
 
 **Decided in this plan, for review:**
 - An application's own rule object gets `code: invalid`.
@@ -248,9 +277,13 @@ LANGSYS_LOCALIZATION=migrate
 
 Run your test suite. Then check one failing form in the browser, and one failing JSON request:
 
-- The 422 body still has `message` and `errors`, with translated text, plus `langsys_errors` entries.
+- The 422 body still has `message` and `errors`, in your source language, plus `langsys_errors` entries for a client to translate.
 - A redirecting form still shows `$errors` in Blade.
 - An Inertia page receives `langsys_errors` as a prop.
+
+### Step 10a — Or stop at `fill`
+
+If you want your existing translations to keep answering and Langsys only to cover what they miss, set `LANGSYS_LOCALIZATION=fill` instead and keep your lang files. Steps 1 to 4 still apply, because a validation message with no line for the requested locale is built the same way. Nothing else in this guide is required.
 
 ### Step 11 — Delete the lang files
 

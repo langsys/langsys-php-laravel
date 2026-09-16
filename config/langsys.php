@@ -19,6 +19,55 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Localization mode
+    |--------------------------------------------------------------------------
+    |
+    | Which layer answers Laravel's own localization calls.
+    |
+    | keep    — the default, and this package stays out of the way entirely.
+    |           Your lang files remain authoritative, and validation messages,
+    |           `__()` and the 422 body are exactly what Laravel produces on its
+    |           own.
+    | migrate — the zero-file model. A validation message is built from the rule
+    |           that failed, with the field's label written into the sentence,
+    |           and registered for translation. What the server sends stays
+    |           Laravel's own text; a client renders the translation from the
+    |           entry that travels beside it.
+    |
+    | Read docs/server-messages.md before switching. It covers what moves where,
+    | and what is translated fresh. (A third mode, `fill`, where Laravel answers
+    | and Langsys covers only what your lang files miss, is planned and not
+    | implemented yet.)
+    |
+    */
+
+    'localization' => env('LANGSYS_LOCALIZATION', 'keep'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Server messages
+    |--------------------------------------------------------------------------
+    |
+    | The category every message template is registered and looked up under. It
+    | has to match what your JS SDKs pass to t(), or a client looks up a phrase
+    | the server filed elsewhere and always falls back to the source text.
+    |
+    */
+
+    'messages' => [
+        'category' => env('LANGSYS_MESSAGES_CATEGORY', 'Errors'),
+
+        /*
+         * Where the entries sit in your error responses. Laravel's own body is
+         * untouched — `message` and `errors` keep their shape and their text —
+         * and the entries travel beside them under this key, for a client SDK
+         * to render translated.
+         */
+        'response_key' => env('LANGSYS_MESSAGES_RESPONSE_KEY', 'langsys_errors'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Translation catalog cache
     |--------------------------------------------------------------------------
     |
