@@ -28,9 +28,10 @@ Spec 8.1.0's MSG family, against the core's `Langsys\SDK\Messages`. Validation f
 - **The entries travel beside Laravel's own error body**, under `langsys.messages.response_key` (default `langsys_errors`), and are flashed to the session across a redirect. `message` and `errors` keep their shape and their text.
 - **The server never emits Langsys-translated text here.** Entries carry source text; a client renders the translation from `entry.template` and falls back to `entry.message` (MSG-5).
 - **A template the catalog lacks is registered after the response**, under `langsys.messages.category` (default `Errors`).
+- **Inertia (MSG-12):** a form that fails and redirects hands its entries to the page it redirects to, as a prop under the same key, so the next page can render them. Inertia is a dev dependency of this package only — nothing is added to an application that does not already use it.
 - Laravel's wording is used verbatim, and every one of its 107 validation rules is classified; a Laravel upgrade that adds a rule or a placeholder fails the suite rather than sending an unclassified message.
 
-Not built yet: the Inertia hand-off, `__()` and `trans()` in migrate mode, `fill` mode, and the `langsys:messages` command.
+Not built yet: `__()` and `trans()` in migrate mode, `fill` mode, and the `langsys:messages` command.
 
 ### Changed
 
