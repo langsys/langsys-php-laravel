@@ -7,7 +7,7 @@ use Langsys\Laravel\Tests\TestCase;
 use Langsys\SDK\Client;
 
 /**
- * MSG-1: the entry's four pieces are fixed, the envelope around them is the application's. Laravel's
+ * MSG-1: the entry's pieces are the core's, the envelope around them is the application's. Laravel's
  * 422 body keeps its shape — `message` and `errors`, in the source language — and the entries sit
  * beside it under a configured key. A form that redirects carries them in the session instead, so
  * the next page can render them.
@@ -17,7 +17,6 @@ class ResponseEnvelopeTest extends TestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
-        $app['config']->set('langsys.localization', 'migrate');
     }
 
     protected function setUp(): void
@@ -73,5 +72,17 @@ class ResponseEnvelopeTest extends TestCase
         $body = $this->postJson('/api/cards', ['cc_number' => '4242'])->assertOk()->json();
 
         $this->assertSame(['cc_number' => '4242'], $body, 'A response that did not fail carries no key of ours, not even an empty one.');
+    }
+
+    /** MSG-1: the names of an entry's pieces are the application's to choose, as the key is. */
+    public function testThePieceNamesAreConfigurable(): void
+    {
+        config()->set('langsys.messages.pieces', ['template' => 'text', 'field' => 'path']);
+
+        $entry = $this->postJson('/api/cards', [])->assertStatus(422)->json('langsys_errors.0');
+
+        $this->assertSame(['path', 'code', 'message', 'text'], array_keys($entry));
+        $this->assertSame('cc_number', $entry['path']);
+        $this->assertSame('The cc number field is required.', $entry['text']);
     }
 }

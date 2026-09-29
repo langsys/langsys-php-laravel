@@ -92,4 +92,18 @@ class ServiceProviderTest extends TestCase
 
         $client->getTranslations('es-es');
     }
+
+    /**
+     * getLocale() falls back to resolving the request itself when nothing has set a locale yet.
+     * Laravel's response carries Vary, so that fallback must not send one through header() either.
+     */
+    public function testTheClientNeverSendsVaryItself(): void
+    {
+        $this->app->forgetInstance(Client::class);
+
+        $options = (new \ReflectionProperty(Client::class, 'requestLocaleOptions'))->getValue($this->app->make(Client::class));
+
+        $this->assertFalse($options['send_vary']);
+        $this->assertSame('langsys_locale', $options['cookie'], 'The fallback reads the same cookie DetectLocale does.');
+    }
 }

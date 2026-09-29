@@ -62,14 +62,14 @@ class InertiaSsrPropsTest extends TestCase
      */
     public function testHandsTheClientTheCatalogThisRequestRenderedWith(): void
     {
-        $this->app->instance(Client::class, $this->offlineClient(['es-es' => ['UI' => ['Save' => 'Guardar']]]));
+        $this->app->instance(Client::class, $this->offlineClient(['es-es' => ['__uncategorized__' => ['Save' => 'Guardar']]]));
         $this->app->setLocale('es-ES');
 
-        $served = Blade::render("@t('Save', 'UI')");
-        $this->seedCatalog('es-es', ['UI' => ['Save' => 'Salvar']]);
+        $served = Blade::render("{{ __('Save') }}");
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Save' => 'Salvar']]);
 
         $this->assertSame('Guardar', $served, 'Control: the render must have read the seeded catalog.');
-        $this->assertSame(['UI' => ['Save' => 'Guardar']], InertiaSsrProps::share()['langsys']['initialTranslations']);
+        $this->assertSame(['__uncategorized__' => ['Save' => 'Guardar']], InertiaSsrProps::share()['langsys']['initialTranslations']);
     }
 
     /**

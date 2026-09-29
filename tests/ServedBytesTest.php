@@ -19,14 +19,15 @@ class ServedBytesTest extends TestCase
     {
         parent::setUp();
 
-        $this->client = $this->offlineClient(['it-it' => ['UI' => ['Pricing' => 'Prezzi']]]);
+        $this->client = $this->offlineClient(['it-it' => ['__uncategorized__' => ['Pricing' => 'Prezzi']]]);
+        $this->client->serveProject(['base_locale' => 'en-us', 'target_locales' => ['it-it']]);
         $this->app->instance(Client::class, $this->client);
     }
 
     protected function defineRoutes($router): void
     {
         $router->middleware(['web', 'langsys.locale'])->get('/pricing', fn () => Blade::render(
-            "<h1>@t('Pricing', 'UI')</h1><p>@t('Talk to sales', 'UI')</p>"
+            "<h1>{{ __('Pricing') }}</h1><p>{{ __('Talk to sales') }}</p>"
         ));
     }
 
@@ -62,7 +63,7 @@ class ServedBytesTest extends TestCase
             @foreach ([1, 2] as $a)
                 @foreach ([1, 2] as $b)
                     @foreach ([1, 2] as $c)
-                        @t('Talk to sales', 'UI')
+                        {{ __('Talk to sales') }}
                     @endforeach
                 @endforeach
             @endforeach

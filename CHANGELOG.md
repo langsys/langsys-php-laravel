@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ⚠️ Release gate
 
-- **Requires the 838 `langsys/langsys-php` core, which is not tagged yet.** This release calls `Client::resetRequestState()` and relies on `translate()` and `translatePage()` never throwing — none of which v1.3.1 has. `^1.3` still resolves to v1.3.1 from Packagist, so a clean install of this branch is broken until the core tags, and CI fails against it by design. At publication the constraint moves to that tag. Nothing publishes before every SDK is green on spec 8.0.1, and then everything publishes at once.
+- **Requires the 838 `langsys/langsys-php` core, which is not tagged yet.** This release calls `Client::resetRequestState()`, `resolveRequestLocale()`, the migration mode, the server-message API and the snapshot seam, and relies on `translate()` and `translatePage()` never throwing — none of which v1.3.1 has. `^1.3` still resolves to v1.3.1 from Packagist, so a clean install of this branch is broken until the core tags, and CI fails against it by design. At publication the constraint moves to that tag. Nothing publishes before every SDK is green on the current spec, and then everything publishes at once.
 
 ### ⚠️ Pending the operator's ruling — not accepted
 
@@ -25,20 +25,33 @@ Spec 8.1.0's MSG family, against the core's `Langsys\SDK\Messages`. Validation f
 
 - **`langsys.localization` (`LANGSYS_LOCALIZATION`)** picks the mode. **`keep` is the default and changes nothing**: Laravel's validator, Laravel's wording, Laravel's 422 body, and nothing sent to Langsys.
 - **`migrate`** builds an entry from each rule that failed — never by reading back the rendered message — with the field's label written into Laravel's own sentence and values kept outside it as `{name}` markers, so each sentence is translated whole and agrees.
+- **A JSON response's entries speak the request's language (FRM-5).** Each entry's `message` is in the locale the app resolved, or the one Accept-Language negotiates against your project's locales, with `Content-Language` on the response and `Vary: Accept-Language` when it was negotiated; `template` and `params` stay the source for an SDK to render. A redirect's entries, and the Inertia prop, stay source.
+- **An entry's `code` is Laravel's own rule name** — `required`, `min`, `required_if` — or, for a rule object or closure, the class Laravel records it under. It does not change with the field's type.
+- **`langsys.messages.pieces`** renames an entry's pieces in your error body, for a client that expects other names (`['template' => 'text']`).
 - **The entries travel beside Laravel's own error body**, under `langsys.messages.response_key` (default `langsys_errors`), and are flashed to the session across a redirect. `message` and `errors` keep their shape and their text.
 - **The server never emits Langsys-translated text here.** Entries carry source text; a client renders the translation from `entry.template` and falls back to `entry.message` (MSG-5).
 - **A template the catalog lacks is registered after the response**, under `langsys.messages.category` (default `Errors`).
 - **Inertia (MSG-12):** a form that fails and redirects hands its entries to the page it redirects to, as a prop under the same key, so the next page can render them. Inertia is a dev dependency of this package only — nothing is added to an application that does not already use it.
 - Laravel's wording is used verbatim, and every one of its 107 validation rules is classified; a Laravel upgrade that adds a rule or a placeholder fails the suite rather than sending an unclassified message.
 
-Not built yet: `__()` and `trans()` in migrate mode, `fill` mode, and the `langsys:messages` command.
+- **`__()`, `trans()`, `@lang` and `trans_choice()` in migrate mode** are answered from the Langsys catalog, with no call site changed (spec MIG-8). The application keeps its source-language lang files: a key resolves to its line there — the app's own files first, then the framework's and packages' bundled English, then `lang/vendor` overrides ahead of a package's own — and that line is the phrase, never the key. Laravel's `:name` becomes `{name}` and a `|` plural over `:count` becomes one ICU plural, so the phrase is the one every Langsys SDK renders. A sentence passed as its own key is converted as the call that received it reads it: `__('Hello :name', ['name' => …])` registers `Hello {name}`, the same phrase as `t('Hello {name}')`, while a `:word` nobody passed and a `|` outside `trans_choice()` stay as Laravel prints them. The group is the category. Validation lines stay with Laravel's translator. Keep mode leaves the translator untouched.
+
+- **`php artisan langsys:messages`** lists every validation message your FormRequests can send, built exactly as a failing request builds it, and names what it cannot list with the fix. `--register` registers what the Langsys catalog lacks; `--strict` fails the build on any problem (by default it reports and exits 0). It also names each validated field with no declared label, with the name Laravel prints instead, and in migrate mode the lang-file lines the migration cannot convert.
+
+Not built yet: `fill` mode.
+
+### Added
+
+- **`langsys.snapshot` (`LANGSYS_SNAPSHOT`)** seeds the client from a catalog snapshot exported from Langsys, so a render has translations with no API call; a phrase the snapshot lacks falls back to the live catalog. A snapshot that fails to load (edited by hand, or not a snapshot) is reported and skipped.
 
 ### Changed
 
+- **The request locale follows Laravel (SRV-6).** When your app has set the locale this request — its own middleware, a user preference, anything that calls `app()->setLocale()` — that locale is used, and the Langsys client is told it in the project's form (a bare `es` becomes the project's default Spanish locale, a locale the project doesn't serve becomes its base locale). Laravel's own locale is never changed. Only when nothing has set it does `DetectLocale` resolve one, from `langsys.locale.sources` in your order, and every candidate must now be a locale your Langsys project serves, narrowed further by `langsys.locale.supported` when set. When it does resolve, the response carries `Vary: Cookie` or `Vary: Accept-Language` for what the choice depended on, so a CDN never serves one visitor's language to the next. With no usable candidate the project's base locale is served.
 - **Failure handling is the SDK's alone.** `LangsysTranslator`, `TranslateResponse` and `FlushPendingRegistrations` no longer catch or fall back themselves: the SDK already catches every failure and degrades to source text, so those copies could only drift from it. A lookup failure is logged through the SDK's logger rather than reported through Laravel's exception handler.
 
 ### Fixed
 
+- **A rule object's entry carries its own message.** It took the field's first message, so a rule object failing beside a built-in rule on the same field sent the built-in rule's sentence as its template. Each `$fail()` of a rule object is now its own entry.
 - **Octane workers now end each request's scope.** The client's write decision and in-memory catalog are reset between requests (spec GATE-3, SRV-2). Before, one request's decision — and its catalog — carried into the next.
 - **Queue workers flush and reset at the end of every job**, including a job that throws. Discovered phrases used to wait for the worker process to exit, and state leaked from job to job.
 - **The Octane listener no longer builds a client nobody used.** It resolved the SDK client on every request — and without credentials the constructor throws, so an app that had not configured Langsys raised an error per request.
@@ -48,7 +61,7 @@ Not built yet: `__()` and `trans()` in migrate mode, `fill` mode, and the `langs
 
 ### Testing
 
-- **`CONFORMANCE.md`** grades this package against all 79 rule ids of SDK spec 8.0.1, each row naming its evidence.
+- **`CONFORMANCE.md`** grades this package against all 114 rule ids of SDK spec 8.2.20, each row naming its evidence.
 - **`BindingBoundaryTest`** — absence probes for delegated behaviour (capability, network, identity and rendering constructs), each with a firing control; the public and config surfaces are pinned.
 - **`RequestScopeTest`** — every long-lived boundary (queue job finished, queue job threw, Octane request), asserting what the *next* unit of work observes on the real SDK.
 - **`TestCase::offlineClient()`** — the real SDK client, catalogs seeded into the Laravel cache and the API on a closed local port, for evidence that has to be the SDK's own code path.

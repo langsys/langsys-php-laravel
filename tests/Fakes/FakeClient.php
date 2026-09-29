@@ -26,7 +26,11 @@ class FakeClient extends Client
 
     public function __construct()
     {
+        // A closed local port: anything that reaches past the seeded catalog, such as the
+        // authorization DetectLocale reads the project's locales from, fails at once instead of
+        // calling a real project.
         parent::__construct('test-key', 'test-project', [
+            'api_url'      => 'http://127.0.0.1:9',
             'cache_driver' => 'none',
         ]);
     }

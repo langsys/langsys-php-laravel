@@ -18,7 +18,6 @@ class MiddlewareRegistrationTest extends TestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
-        $app['config']->set('langsys.localization', 'migrate');
 
         self::$kernel = new class implements HttpKernel {
             /** @var array<string, list<string>> */

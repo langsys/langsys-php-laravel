@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Langsys\Laravel\Messages\MessageValidator;
+use Langsys\Laravel\Support\RequestLocaleWiring;
+use Langsys\SDK\Client;
 use Langsys\SDK\Messages\ServerMessage;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -19,9 +21,10 @@ use Symfony\Component\HttpFoundation\Response;
  * writes them, and the entries sit under a configured key. A form that redirects carries them in
  * the session instead, so the page rendered next can hand them to its own SDK.
  *
- * The entries carry source text, never a translation — the client renders that from
- * `entry.template` (MSG-5). Laravel's pipeline attaches the exception it rendered to the response,
- * which is what lets this read the validator without the application wiring anything.
+ * Every entry carries its source `template` and `params`, which a client SDK renders (MSG-5). In a
+ * JSON response its `message` is in the request's language, for a client with no SDK (FRM-5); across
+ * a redirect it stays the source fill. Laravel's pipeline attaches the exception it rendered to the
+ * response, which is what lets this read the validator without the application wiring anything.
  *
  * On the way in it does the other half of MSG-12: entries flashed by the request that failed are
  * shared with Inertia before the page renders, so the page it redirected to receives them as a
@@ -41,9 +44,9 @@ class AttachServerMessages
         }
 
         $response = $next($request);
-        $entries = $this->_entries($response);
+        $messages = $this->_messages($response);
 
-        if ($entries === []) {
+        if ($messages === []) {
             return $response;
         }
 
@@ -52,7 +55,7 @@ class AttachServerMessages
 
             // Only a body we can extend: anything else is the application's shape to keep.
             if (is_array($data)) {
-                $data[$key] = $entries;
+                $data[$key] = $this->_negotiated($request, $response, $messages);
                 $response->setData($data);
             }
 
@@ -60,14 +63,43 @@ class AttachServerMessages
         }
 
         if ($response instanceof RedirectResponse && $request->hasSession()) {
-            $request->session()->flash($key, $entries);
+            $request->session()->flash($key, self::_entries($messages));
         }
 
         return $response;
     }
 
-    /** @return list<array<string, mixed>> */
-    private function _entries(Response $response): array
+    /**
+     * FRM-5: a JSON response is read by a client that may have no SDK, so each entry's `message` is
+     * in the request's language — the locale the app resolved when it resolved one (SRV-6), else
+     * Accept-Language negotiated against the project's locales — beside the `template` and `params`
+     * an SDK renders itself. The core negotiates and translates; the headers go on Laravel's own
+     * response. A redirect's entries stay source: the page they reach has its own SDK (FRM-4).
+     *
+     * @param  list<ServerMessage>  $messages
+     * @return list<array<string, mixed>>
+     */
+    private function _negotiated(Request $request, JsonResponse $response, array $messages): array
+    {
+        $client = app(Client::class);
+        $choice = $request->attributes->get(DetectLocale::RESOLVED) === true
+            ? $client->resolveRequestLocale(['framework' => app()->getLocale()], ['send_vary' => false])
+            : $client->resolveRequestLocale(['accept_language' => $request->header('Accept-Language')], RequestLocaleWiring::headerOnly());
+        $locale = $choice['locale'];
+
+        if ($locale !== null) {
+            $response->headers->set('Content-Language', $locale);
+        }
+
+        if ($choice['vary'] !== null) {
+            $response->setVary($choice['vary'], false);
+        }
+
+        return self::_entries($messages, fn (ServerMessage $message) => $locale === null ? $message->getMessage() : $client->translateMessage($message, $locale));
+    }
+
+    /** @return list<ServerMessage> */
+    private function _messages(Response $response): array
     {
         $exception = $response->exception ?? null;
 
@@ -75,6 +107,38 @@ class AttachServerMessages
             return [];
         }
 
-        return array_map(fn (ServerMessage $message) => $message->toArray(), $exception->validator->serverMessages());
+        return $exception->validator->serverMessages();
+    }
+
+    /**
+     * @param  list<ServerMessage>  $messages
+     * @param  (callable(ServerMessage): string)|null  $message  The entry's `message`, when not its source fill.
+     * @return list<array<string, mixed>>
+     */
+    private static function _entries(array $messages, ?callable $message = null): array
+    {
+        $pieces = (array) config('langsys.messages.pieces', []);
+
+        return array_map(function (ServerMessage $entry) use ($message, $pieces) {
+            $piecesOut = $entry->toArray();
+
+            if ($message !== null) {
+                $piecesOut['message'] = $message($entry);
+            }
+
+            return self::_named($piecesOut, $pieces);
+        }, $messages);
+    }
+
+    /** MSG-1: each piece under the name the application chose for it, in the core's order. */
+    private static function _named(array $entry, array $pieces): array
+    {
+        $named = [];
+
+        foreach ($entry as $piece => $value) {
+            $named[$pieces[$piece] ?? $piece] = $value;
+        }
+
+        return $named;
     }
 }

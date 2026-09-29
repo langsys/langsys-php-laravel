@@ -23,7 +23,6 @@ class MigrateModeTest extends TestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
-        $app['config']->set('langsys.localization', 'migrate');
     }
 
     private function _failing(): LaravelValidator

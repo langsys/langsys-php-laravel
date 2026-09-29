@@ -98,15 +98,59 @@ class ValidatorMessagesTest extends TestCase
         $this->assertSame('The born on field must be a date before {date}.', $this->_entry($this->_cases()['before a literal date'])->getTemplate());
     }
 
-    /** MSG-2: the code comes from the rule and the field's type, not from the text. */
-    public function testTheCodeComesFromTheRuleAndTheFieldType(): void
+    /** MSG-2: the code is Laravel's own name for the rule that failed, whatever the field's type. */
+    public function testTheCodeIsLaravelsRuleName(): void
     {
-        $this->assertSame('too_short', $this->_entry($this->_cases()['min on text'])->getCode());
-        $this->assertSame('too_small', $this->_entry($this->_cases()['min on a number'])->getCode());
-        $this->assertSame('too_many', $this->_entry($this->_cases()['between on a list'])->getCode());
+        $this->assertSame('min', $this->_entry($this->_cases()['min on text'])->getCode());
+        $this->assertSame('min', $this->_entry($this->_cases()['min on a number'])->getCode());
+        $this->assertSame('between', $this->_entry($this->_cases()['between on a list'])->getCode());
         $this->assertSame('required', $this->_entry($this->_cases()['required'])->getCode());
-        $this->assertSame('mismatch', $this->_entry($this->_cases()['same as another field'])->getCode());
-        $this->assertSame('invalid_option', $this->_entry($this->_cases()['in'])->getCode());
+        $this->assertSame('same', $this->_entry($this->_cases()['same as another field'])->getCode());
+        $this->assertSame('in', $this->_entry($this->_cases()['in'])->getCode());
+    }
+
+    /** A rule object or a closure fails under the class Laravel records it by, and that is its code. */
+    public function testARuleObjectOrClosureCarriesTheClassLaravelRecords(): void
+    {
+        $validator = Validator::make(['code' => 'abc', 'name' => 'x'], [
+            'code' => [new Fixtures\Uppercase()],
+            'name' => [fn (string $attribute, mixed $value, \Closure $fail) => $fail('The :attribute is taken.')],
+        ]);
+        $validator->fails();
+
+        $entries = ValidatorMessages::fromValidator($validator, 'en');
+
+        $this->assertSame([Fixtures\Uppercase::class, \Illuminate\Validation\ClosureValidationRule::class], array_map(fn ($entry) => $entry->getCode(), $entries));
+    }
+
+    /**
+     * A rule object's entry carries its own message, even when an earlier rule on the same field
+     * failed too: Laravel keeps a field's messages in the order its rules failed.
+     */
+    public function testARuleObjectCarriesItsOwnMessageBesideAnotherFailure(): void
+    {
+        $validator = Validator::make(['code' => 'abc'], ['code' => ['in:ABC,DEF', new Fixtures\Uppercase()]]);
+        $validator->fails();
+
+        $entries = ValidatorMessages::fromValidator($validator, 'en');
+
+        $this->assertSame(['in', Fixtures\Uppercase::class], array_map(fn ($entry) => $entry->getCode(), $entries));
+        $this->assertSame('The code must be uppercase.', $entries[1]->getTemplate());
+    }
+
+    /** A rule object that fails twice sends both messages, one entry each, after the built-in rule's. */
+    public function testEachFailureOfARuleObjectIsItsOwnEntry(): void
+    {
+        $validator = Validator::make(['secret' => 'ab'], ['secret' => ['min:5', new Fixtures\TwoFailures()]]);
+        $validator->fails();
+
+        $templates = array_map(fn ($entry) => $entry->getTemplate(), ValidatorMessages::fromValidator($validator, 'en'));
+
+        $this->assertSame([
+            'The secret field must be at least {min} characters.',
+            'The secret is too plain.',
+            'The secret is too short to be safe.',
+        ], $templates);
     }
 
     /** One entry per failed rule, in order, each carrying its own field. */
@@ -117,7 +161,7 @@ class ValidatorMessagesTest extends TestCase
 
         $entries = ValidatorMessages::fromValidator($validator, 'en');
 
-        $this->assertSame(['invalid_format', 'too_short', 'required'], array_map(fn ($entry) => $entry->getCode(), $entries));
+        $this->assertSame(['email', 'min', 'required'], array_map(fn ($entry) => $entry->getCode(), $entries));
         $this->assertSame(['email', 'email', 'name'], array_map(fn ($entry) => $entry->getField(), $entries));
     }
 
@@ -138,15 +182,19 @@ class ValidatorMessagesTest extends TestCase
         $this->assertSame('The card number field is required.', ValidatorMessages::fromValidator($validator, 'en')[0]->getTemplate());
     }
 
-    /** MSG-9: a failure that arrives with text and no rule keeps the text as its template, under `invalid`. */
-    public function testATextOnlyFailureBecomesInvalid(): void
+    /**
+     * MSG-9 and MSG-2: a failure that arrives with text and no rule keeps the text as its template,
+     * and carries no code — Laravel has no identifier for it, and the entry invents none.
+     */
+    public function testATextOnlyFailureCarriesNoCode(): void
     {
         $exception = ValidationException::withMessages(['token' => 'This link has expired.']);
 
         $entries = ValidatorMessages::fromValidator($exception->validator, 'en');
 
         $this->assertCount(1, $entries);
-        $this->assertSame('invalid', $entries[0]->getCode());
+        $this->assertNull($entries[0]->getCode());
+        $this->assertArrayNotHasKey('code', $entries[0]->toArray());
         $this->assertSame('This link has expired.', $entries[0]->getTemplate());
         $this->assertSame('token', $entries[0]->getField());
     }

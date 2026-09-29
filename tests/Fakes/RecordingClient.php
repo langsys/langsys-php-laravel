@@ -17,11 +17,14 @@ class RecordingClient extends Client
     /** @var list<string> */
     public array $calls = [];
 
+    /** @var array|null What the core's last flush reported. */
+    public ?array $lastFlush = null;
+
     public function flushPendingRegistrations()
     {
         $this->calls[] = 'flush';
 
-        return parent::flushPendingRegistrations();
+        return $this->lastFlush = parent::flushPendingRegistrations();
     }
 
     public function resetRequestState()
@@ -35,6 +38,15 @@ class RecordingClient extends Client
     public function writeDecision(): ?bool
     {
         return (new ReflectionProperty(Client::class, 'writeEnabled'))->getValue($this);
+    }
+
+    /**
+     * The project's authorization as a later request would find it cached, under the SDK's own
+     * key: the locales it serves decide what the request locale can be (SRV-6).
+     */
+    public function serveProject(array $project): void
+    {
+        $this->getCache()->set($this->authCacheKey(), $project);
     }
 
     /** As though this unit of work had already been authorized. */

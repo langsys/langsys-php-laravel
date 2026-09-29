@@ -19,29 +19,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Localization mode
+    | Enabled
     |--------------------------------------------------------------------------
     |
-    | Which layer answers Laravel's own localization calls.
-    |
-    | keep    — the default, and this package stays out of the way entirely.
-    |           Your lang files remain authoritative, and validation messages,
-    |           `__()` and the 422 body are exactly what Laravel produces on its
-    |           own.
-    | migrate — the zero-file model. A validation message is built from the rule
-    |           that failed, with the field's label written into the sentence,
-    |           and registered for translation. What the server sends stays
-    |           Laravel's own text; a client renders the translation from the
-    |           entry that travels beside it.
-    |
-    | Read docs/server-messages.md before switching. It covers what moves where,
-    | and what is translated fresh. (A third mode, `fill`, where Laravel answers
-    | and Langsys covers only what your lang files miss, is planned and not
-    | implemented yet.)
+    | Once installed, Langsys answers Laravel's own translate function:
+    | `__()`, `trans()`, `trans_choice()` and `@lang` return the catalog's
+    | translation, else your lang files' translation, else the source. With
+    | nothing in the catalog that is exactly what Laravel returns on its own.
+    | Validation failures also carry entries a client SDK can translate. Turn
+    | it off to debug with plain Laravel: nothing of this package is installed.
     |
     */
 
-    'localization' => env('LANGSYS_LOCALIZATION', 'keep'),
+    'enabled' => env('LANGSYS_ENABLED', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Catalog snapshot
+    |--------------------------------------------------------------------------
+    |
+    | A snapshot file exported from Langsys. The client reads it before the
+    | network, so a render has translations with no API call, and a phrase it
+    | lacks falls back to the live catalog. It is a cache: export it again to
+    | refresh it, never edit it. A file that fails to load is reported and
+    | skipped.
+    |
+    */
+
+    'snapshot' => env('LANGSYS_SNAPSHOT'),
 
     /*
     |--------------------------------------------------------------------------
@@ -64,6 +69,13 @@ return [
          * to render translated.
          */
         'response_key' => env('LANGSYS_MESSAGES_RESPONSE_KEY', 'langsys_errors'),
+
+        /*
+         * The names of an entry's pieces, where your client expects others:
+         * ['template' => 'text', 'field' => 'path']. Unlisted pieces keep
+         * their names: field, code, message, template, params.
+         */
+        'pieces' => [],
     ],
 
     /*
@@ -88,10 +100,13 @@ return [
     | Locale detection (DetectLocale middleware)
     |--------------------------------------------------------------------------
     |
-    | Sources are tried in order; the first hit wins. `persist` stores an
-    | explicit choice (query source) so later requests keep it: 'cookie',
-    | 'session', or null. `supported` restricts accepted locales (empty array
-    | accepts anything).
+    | Laravel's locale comes first: when your app has already set it (its own
+    | middleware, a user preference), that locale is used. Otherwise the
+    | sources are tried in order, the first usable one wins, and the response
+    | carries the Vary header that choice requires. A candidate must be a
+    | locale your Langsys project serves; `supported` narrows that further
+    | (empty accepts every project locale). `persist` keeps a query-string
+    | choice for later requests: 'cookie', 'session', or null.
     |
     */
 

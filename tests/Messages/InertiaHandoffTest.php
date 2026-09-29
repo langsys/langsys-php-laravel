@@ -24,7 +24,6 @@ class InertiaHandoffTest extends TestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
-        $app['config']->set('langsys.localization', 'migrate');
     }
 
     protected function setUp(): void

@@ -3,19 +3,26 @@
 namespace Langsys\Laravel;
 
 use Illuminate\Contracts\Foundation\Application;
+use Langsys\Laravel\Console\MessagesCommand;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Events\LocaleUpdated;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
-use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Translation\Translator;
 use Langsys\Laravel\Cache\LaravelCacheAdapter;
 use Langsys\Laravel\Http\Middleware\AttachServerMessages;
 use Langsys\Laravel\Http\Middleware\DetectLocale;
 use Langsys\Laravel\Http\Middleware\FlushPendingRegistrations;
 use Langsys\Laravel\Http\Middleware\TranslateResponse;
 use Langsys\Laravel\Messages\MessageValidator;
+use Langsys\Laravel\Support\RequestLocaleWiring;
+use Langsys\Laravel\Translation\CatalogTranslator;
+use Langsys\Laravel\Translation\MigrationFiles;
 use Langsys\SDK\Client;
+use Langsys\SDK\Snapshot\Snapshot;
+use Throwable;
 
 class LangsysServiceProvider extends ServiceProvider
 {
@@ -29,6 +36,11 @@ class LangsysServiceProvider extends ServiceProvider
             return new Client($config['api_key'], $config['project_id'], [
                 'api_url'           => $config['api_url'],
                 'messages_category' => $config['messages']['category'],
+                'request_locale'    => RequestLocaleWiring::options(),
+                'snapshot'          => self::_snapshot($config['snapshot'] ?? null),
+                'migration'         => $config['enabled']
+                    ? MigrationFiles::for($app['translation.loader'], $app->langPath(), $app['config']['app.fallback_locale'])
+                    : null,
                 'cache'             => new LaravelCacheAdapter(
                     $app['cache']->store($config['cache']['store']),
                     $config['cache']['prefix'],
@@ -39,6 +51,8 @@ class LangsysServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(LangsysTranslator::class);
+
+        $this->_registerCatalogTranslator();
     }
 
     public function boot(): void
@@ -47,21 +61,44 @@ class LangsysServiceProvider extends ServiceProvider
             __DIR__ . '/../config/langsys.php' => config_path('langsys.php'),
         ], 'langsys-config');
 
-        $this->_registerBladeDirective();
+        if ($this->app->runningInConsole()) {
+            $this->commands([MessagesCommand::class]);
+        }
+
         $this->_registerMiddlewareAliases();
         $this->_registerLongLivedBoundaries();
         $this->_registerServerMessages();
     }
 
-    private function _registerBladeDirective(): void
+    /**
+     * The core loads and checks the snapshot (SNAP-2, SNAP-3). One it refuses is reported and left
+     * out: the client then reads the live catalog, as it would with no snapshot at all.
+     */
+    private static function _snapshot(?string $path): ?Snapshot
     {
-        Blade::directive('t', fn (string $expression) => "<?php echo e(t($expression)); ?>");
+        if ($path === null || $path === '') {
+            return null;
+        }
+
+        try {
+            return Snapshot::load($path);
+        } catch (Throwable $e) {
+            report($e);
+
+            return null;
+        }
     }
 
     private function _registerMiddlewareAliases(): void
     {
         $router = $this->app['router'];
         $router->aliasMiddleware('langsys.locale', DetectLocale::class);
+
+        // The app resolved the locale if anything set it before DetectLocale runs (SRV-6).
+        $this->app['events']->listen(
+            LocaleUpdated::class,
+            fn () => $this->app['request']->attributes->set(DetectLocale::RESOLVED, true)
+        );
         $router->aliasMiddleware('langsys.flush', FlushPendingRegistrations::class);
 
         // Deliberately not added to any group: automatic response translation
@@ -78,13 +115,34 @@ class LangsysServiceProvider extends ServiceProvider
     }
 
     /**
-     * In migrate mode Laravel builds this package's validator, so a failure is rendered from the
-     * rule that failed rather than from a lang file. In keep mode nothing is installed at all and
-     * Laravel answers exactly as it would without this package.
+     * Laravel's `translator` is this package's subclass (FRM-1), so every `__()` in the application
+     * and its packages is answered from the catalog without a call site changing. The loader,
+     * locale and fallback are Laravel's own; only where a line comes from differs. Off, Laravel's
+     * own translator is left in place.
+     */
+    private function _registerCatalogTranslator(): void
+    {
+        // Decided when the translator is built, not here: configuration is final by then.
+        $this->app->extend('translator', function (Translator $translator, Application $app) {
+            if (!$app['config']['langsys.enabled']) {
+                return $translator;
+            }
+
+            $catalog = new CatalogTranslator($translator->getLoader(), $translator->getLocale(), fn () => $app->make(LangsysTranslator::class));
+            $catalog->setFallback($translator->getFallback());
+
+            return $catalog;
+        });
+    }
+
+    /**
+     * Laravel builds this package's validator, so each failure also carries an entry built from the
+     * rule that failed, which a client SDK can translate. Off, nothing is installed and Laravel
+     * answers exactly as it would without this package.
      */
     private function _registerServerMessages(): void
     {
-        if (config('langsys.localization') !== 'migrate') {
+        if (!config('langsys.enabled')) {
             return;
         }
 
@@ -140,9 +198,9 @@ class LangsysServiceProvider extends ServiceProvider
      * build it, and without credentials its constructor throws — on every job
      * and every Octane request of an app that has not configured Langsys.
      *
-     * Flush before reset. resetRequestState() does not send the queue, and a
-     * reset first would judge this unit's discoveries against a cleared write
-     * decision. Neither call can throw — the SDK catches every failure inside
+     * Flush before reset. resetRequestState() drops whatever is still queued —
+     * one unit's phrases never ride another's send (REG-8) — so a reset first
+     * would discard this unit's discoveries unsent. Neither call can throw — the SDK catches every failure inside
      * both — so nothing here guards them.
      */
     private function _endRequestScope(): void

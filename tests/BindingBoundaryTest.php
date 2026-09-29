@@ -45,7 +45,7 @@ class BindingBoundaryTest extends TestCase
         'pagetranslator', 'markuptokenizer', 'interpolator', 'getinterpolator', 'messageformatter',
         'preg_replace', 'preg_match', 'mb_ereg_replace', '__uncategorized__', 'data-ls-', 'data-langsys-',
         'getpendingphrases', 'getpendingcontentblocks', 'translatecontentblock',
-        // MSG-2's split of a size failure by field type is the core's (MessageCodes::forBound).
+        // MSG-2: a code is Laravel's own rule name. A shared size vocabulary would be a mapping of ours.
         'too_short', 'too_long', 'too_small', 'too_large', 'too_few', 'too_many',
     ];
 
@@ -56,6 +56,7 @@ class BindingBoundaryTest extends TestCase
      */
     private const PUBLIC_SURFACE = [
         'Langsys\\Laravel\\Cache\\LaravelCacheAdapter'                  => ['__construct', 'clear', 'delete', 'get', 'has', 'set'],
+        'Langsys\\Laravel\\Console\\MessagesCommand'                    => ['handle'],
         'Langsys\\Laravel\\Facades\\Langsys'                            => [],
         'Langsys\\Laravel\\Http\\Middleware\\AttachServerMessages'      => ['handle'],
         'Langsys\\Laravel\\Http\\Middleware\\DetectLocale'              => ['__construct', 'handle'],
@@ -63,11 +64,15 @@ class BindingBoundaryTest extends TestCase
         'Langsys\\Laravel\\Http\\Middleware\\TranslateResponse'         => ['__construct', 'handle'],
         'Langsys\\Laravel\\LangsysServiceProvider'                      => ['boot', 'register'],
         'Langsys\\Laravel\\LangsysTranslator'                           => ['__construct', 'client', 'translate'],
-        'Langsys\\Laravel\\Messages\\RuleWording'                       => ['classification', 'codesFor'],
+        'Langsys\\Laravel\\Messages\\RuleWording'                       => ['placeholders'],
         'Langsys\\Laravel\\Messages\\MessageValidator'                   => ['passes', 'serverMessages'],
-        'Langsys\\Laravel\\Messages\\ValidatorMessages'                  => ['fromValidator'],
+        'Langsys\\Laravel\\Messages\\FormRequestSource'                  => ['__construct', 'collect', 'fromRoutes'],
+        'Langsys\\Laravel\\Messages\\ValidatorMessages'                  => ['forRule', 'fromValidator'],
         'Langsys\\Laravel\\Support\\InertiaSsrProps'                    => ['share'],
         'Langsys\\Laravel\\Support\\LocaleFormatter'                    => ['canonicalize'],
+        'Langsys\\Laravel\\Support\\RequestLocaleWiring'                => ['headerOnly', 'options'],
+        'Langsys\\Laravel\\Translation\\CatalogTranslator'              => ['__construct', 'choice', 'get', 'has'],
+        'Langsys\\Laravel\\Translation\\MigrationFiles'                 => ['for'],
     ];
 
     /**
@@ -81,17 +86,19 @@ class BindingBoundaryTest extends TestCase
         'cache.prefix'                => 'core `cache` option, mapped onto a Laravel store',
         'cache.store'                 => 'core `cache` option, mapped onto a Laravel store',
         'cache.ttl'                   => 'core cache TTL (Config::getCacheTtl), applied by the Laravel store adapter',
-        'locale.cookie'               => 'where Laravel reads the request locale from',
-        'locale.cookie_minutes'       => 'where Laravel reads the request locale from',
-        'locale.persist'              => 'where Laravel reads the request locale from',
-        'locale.query_param'          => 'where Laravel reads the request locale from',
-        'locale.session_key'          => 'where Laravel reads the request locale from',
-        'locale.sources'              => 'where Laravel reads the request locale from',
-        'locale.supported'            => 'where Laravel reads the request locale from',
-        'localization'                => 'whether Laravel or the core answers Laravel\'s own localization calls',
+        'enabled'                     => 'the off switch FRM-1 calls for: whether Laravel invokes the core at all',
+        'locale.cookie'               => 'SRV-6 wiring: the cookie the request locale is kept in',
+        'locale.cookie_minutes'       => 'SRV-6 wiring: the lifetime of that cookie',
+        'locale.persist'              => 'SRV-6 wiring: where a query-string choice is kept',
+        'locale.query_param'          => 'SRV-6 wiring: the query parameter the app routes by',
+        'locale.session_key'          => 'SRV-6 wiring: the session key the request locale is kept in',
+        'locale.sources'              => 'SRV-6 wiring: which of the app\'s sources are read, in its order',
+        'locale.supported'            => 'SRV-6 wiring: the app\'s own narrowing of the project\'s locales',
         'messages.category'           => "the core's messages_category option",
+        'messages.pieces'             => 'the names of an entry\'s pieces in the application\'s own error body (MSG-1)',
         'messages.response_key'       => 'where the entries sit in the application\'s own error body (MSG-1)',
         'project_id'                  => 'core option',
+        'snapshot'                    => "core `snapshot` option, the file Laravel's config names (SNAP-2)",
         'translate_response.category' => 'the $category argument of translatePage()',
         'translate_response.enabled'  => 'whether Laravel invokes translatePage()',
         'translate_response.except'   => 'on which routes Laravel invokes translatePage()',

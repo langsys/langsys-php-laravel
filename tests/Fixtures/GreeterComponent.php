@@ -6,7 +6,7 @@ use Livewire\Component;
 
 /**
  * A minimal Livewire component exercising the Langsys integration inside the
- * Livewire lifecycle: `@t` in the inline Blade view (with interpolation), and a
+ * Livewire lifecycle: `__()` in the inline Blade view (with interpolation), and a
  * second phrase that only appears after an interaction — used to prove token
  * discovery happens on a Livewire UPDATE, not just the initial page render.
  */
@@ -25,9 +25,9 @@ class GreeterComponent extends Component
     {
         return <<<'blade'
         <div>
-            <h1>@t('Welcome back, {name}', 'Livewire', ['name' => $name])</h1>
+            <h1>{{ __('Welcome back, {name}', ['name' => $name]) }}</h1>
             @if ($expanded)
-                <p>@t('Here are your latest updates', 'Livewire')</p>
+                <p>{{ __('Here are your latest updates') }}</p>
             @endif
         </div>
         blade;

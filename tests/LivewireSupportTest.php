@@ -10,7 +10,7 @@ use Livewire\Livewire;
 use Livewire\LivewireServiceProvider;
 
 /**
- * Proves Livewire "support" is real, not just architectural: `@t` resolves in
+ * Proves Livewire "support" is real, not just architectural: `__()` resolves in
  * the active locale inside a Livewire component, interpolation runs, and — the
  * load-bearing claim — a phrase that only surfaces on a Livewire interaction is
  * discovered (queued) and then drained by the flush middleware. Locale
@@ -31,7 +31,7 @@ class LivewireSupportTest extends TestCase
     public function testTranslatesAndInterpolatesInsideALivewireComponent(): void
     {
         $this->app->setLocale('es-ES');
-        $this->fakeClient->seed('es-ES', 'Livewire', [
+        $this->fakeClient->seed('es-ES', '__uncategorized__', [
             'Welcome back, {name}' => 'Bienvenida de nuevo, {name}',
         ]);
 
@@ -42,7 +42,7 @@ class LivewireSupportTest extends TestCase
     public function testInterpolationTracksAReactivePropertyAcrossUpdates(): void
     {
         $this->app->setLocale('es-ES');
-        $this->fakeClient->seed('es-ES', 'Livewire', [
+        $this->fakeClient->seed('es-ES', '__uncategorized__', [
             'Welcome back, {name}' => 'Bienvenida de nuevo, {name}',
         ]);
 
@@ -55,7 +55,7 @@ class LivewireSupportTest extends TestCase
     public function testPhraseSurfacedByAnInteractionIsDiscoveredThenFlushed(): void
     {
         $this->app->setLocale('es-ES');
-        $this->fakeClient->seed('es-ES', 'Livewire', [
+        $this->fakeClient->seed('es-ES', '__uncategorized__', [
             'Welcome back, {name}' => 'Bienvenida de nuevo, {name}',
         ]);
 
@@ -67,7 +67,7 @@ class LivewireSupportTest extends TestCase
 
         // Token discovery fired during the Livewire update, not just page load.
         $this->assertContains(
-            ['phrase' => 'Here are your latest updates', 'category' => 'Livewire'],
+            ['phrase' => 'Here are your latest updates', 'category' => '__uncategorized__'],
             $this->fakeClient->queuedPhrases
         );
 

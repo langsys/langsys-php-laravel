@@ -13,7 +13,7 @@ class FlushPendingRegistrationsTest extends TestCase
     protected function defineRoutes($router): void
     {
         $router->middleware(['web', 'langsys.locale', 'langsys.flush'])->get('/page', function () {
-            return t('A phrase nobody translated yet', 'Landing');
+            return t('A phrase nobody translated yet');
         });
     }
 

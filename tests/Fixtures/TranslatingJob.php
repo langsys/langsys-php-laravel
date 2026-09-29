@@ -18,14 +18,13 @@ class TranslatingJob implements ShouldQueue
 
     public function __construct(
         public string $phrase,
-        public string $category = 'UI',
         public bool $fail = false,
     ) {
     }
 
     public function handle(): void
     {
-        t($this->phrase, $this->category);
+        t($this->phrase);
 
         if ($this->fail) {
             throw new RuntimeException('The job failed after rendering.');

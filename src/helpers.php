@@ -1,14 +1,12 @@
 <?php
 
-use Langsys\Laravel\LangsysTranslator;
-
 if (!function_exists('t')) {
     /**
-     * Translate a phrase through Langsys. Mirrors the JS SDKs' signature:
-     * t($phrase, $category?, $params?, $locale?).
+     * `__()` by a shorter name, with the same arguments and the same answer. Laravel's own
+     * translate function is the SDK's (FRM-1); this adds no second one.
      */
-    function t(string $phrase, ?string $category = null, array $params = [], ?string $locale = null): string
+    function t($key = null, $replace = [], $locale = null)
     {
-        return app(LangsysTranslator::class)->translate($phrase, $category, $params, $locale);
+        return __($key, $replace, $locale);
     }
 }

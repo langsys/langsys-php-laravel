@@ -60,7 +60,7 @@ class RequestScopeTest extends TestCase
 
     private function _bindOfflineClient(): RecordingClient
     {
-        $client = $this->offlineClient(['es-es' => ['UI' => ['Save' => 'Guardar']]]);
+        $client = $this->offlineClient(['es-es' => ['__uncategorized__' => ['Save' => 'Guardar']]]);
 
         $this->app->instance(Client::class, $client);
         $this->app->forgetInstance(LangsysTranslator::class);
@@ -69,9 +69,8 @@ class RequestScopeTest extends TestCase
     }
 
     /**
-     * resetRequestState() does not send the queue, so the flush comes first; a
-     * reset before it would judge this unit's discoveries against a cleared
-     * write decision.
+     * resetRequestState() drops whatever is still queued, so the flush comes
+     * first; a reset before it would discard this unit's discoveries unsent.
      */
     public function testEveryBoundaryFlushesAndThenResets(): void
     {
@@ -100,12 +99,12 @@ class RequestScopeTest extends TestCase
     {
         foreach ($this->_boundaries() as $boundary => $end) {
             $this->_bindOfflineClient();
-            $this->assertSame('Guardar', t('Save', 'UI'), 'Control: this unit must have read the seeded catalog.');
+            $this->assertSame('Guardar', t('Save'), 'Control: this unit must have read the seeded catalog.');
 
-            $this->seedCatalog('es-es', ['UI' => ['Save' => 'Salvar']]);
+            $this->seedCatalog('es-es', ['__uncategorized__' => ['Save' => 'Salvar']]);
             $end();
 
-            $this->assertSame('Salvar', t('Save', 'UI'), "Boundary: {$boundary} served the previous unit's catalog.");
+            $this->assertSame('Salvar', t('Save'), "Boundary: {$boundary} served the previous unit's catalog.");
         }
     }
 
@@ -128,10 +127,10 @@ class RequestScopeTest extends TestCase
     }
 
     /**
-     * WIRE-4 and REG-10 at a boundary: a phrase a job discovers, flushed
-     * against an unreachable API, fails nothing. The job completes, the
-     * boundary still resets, and the undelivered phrase stays queued for a
-     * later flush rather than being dropped as though it were sent.
+     * WIRE-4, REG-8 and REG-10 at a boundary: a phrase a job discovers, flushed against an
+     * unreachable API, fails nothing. The job completes and the boundary still resets. What the
+     * flush could not send belongs to this unit of work and ends with it, so the next job starts
+     * with an empty queue and re-collects its own misses.
      */
     public function testAFlushThatCannotReachTheApiFailsNothing(): void
     {
@@ -141,6 +140,23 @@ class RequestScopeTest extends TestCase
         $this->app['queue']->connection('sync')->push(new TranslatingJob('A phrase nobody translated yet'));
 
         $this->assertSame(['flush', 'reset'], $client->calls);
-        $this->assertContains('A phrase nobody translated yet', array_column($client->getPendingPhrases(), 'phrase'));
+        $this->assertSame([], $client->getPendingPhrases(), "This job's phrases must not ride the next job's send.");
+    }
+
+    /**
+     * REG-10 at a boundary: a write skipped because the key may not write is reported by the core
+     * as a failure naming its reason, and the binding passes nothing success-shaped on. The
+     * boundary has no caller to hand the result to; the core logs it.
+     */
+    public function testASkippedWriteAtABoundaryIsNamedByTheCore(): void
+    {
+        $client = $this->_bindOfflineClient();
+        $client->decideWrite(false);
+
+        $this->app['queue']->connection('sync')->push(new TranslatingJob('A phrase a read key found'));
+
+        $this->assertSame(['flush', 'reset'], $client->calls);
+        $this->assertFalse($client->lastFlush['success']);
+        $this->assertSame('not_write_enabled', $client->lastFlush['reason']);
     }
 }

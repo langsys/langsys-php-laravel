@@ -5,7 +5,6 @@ namespace Langsys\Laravel\Messages;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Validator;
-use Langsys\SDK\Messages\MessageCodes;
 use Langsys\SDK\Messages\ServerMessage;
 use ReflectionMethod;
 
@@ -35,8 +34,14 @@ final class ValidatorMessages
         $entries = [];
 
         foreach ($failed as $attribute => $rules) {
+            $messages = $validator->errors()->get((string) $attribute);
+            $spans = self::_messageSpans(array_keys($rules), count($messages));
+            $cursor = 0;
+
             foreach ($rules as $rule => $parameters) {
-                $entries[] = self::_entry($validator, (string) $attribute, (string) $rule, (array) $parameters, $sourceLocale);
+                $span = array_slice($messages, $cursor, $spans[$rule]);
+                $cursor += $spans[$rule];
+                array_push($entries, ...self::_entries($validator, (string) $attribute, (string) $rule, (array) $parameters, $sourceLocale, $span));
             }
         }
 
@@ -55,26 +60,75 @@ final class ValidatorMessages
         return $entries;
     }
 
-    private static function _entry(Validator $validator, string $attribute, string $rule, array $parameters, ?string $sourceLocale): ServerMessage
+    /**
+     * @param  list<string>  $span  The messages this rule added to the bag.
+     * @return list<ServerMessage>
+     */
+    private static function _entries(Validator $validator, string $attribute, string $rule, array $parameters, ?string $sourceLocale, array $span): array
     {
-        $classification = RuleWording::classification(Str::snake($rule));
+        $entry = self::forRule($validator, $attribute, $rule, $parameters, $sourceLocale);
 
-        // A rule this package has no wording for: an application's own rule object, or a closure.
-        // Whatever text it produced is the only source there is, and the build-time command
-        // reports it so it can be given a real template (MSG-7).
-        if ($classification === null) {
-            return ServerMessage::fromText((string) $validator->errors()->first($attribute), $attribute);
+        if ($entry !== null) {
+            return [$entry];
         }
 
-        $line = self::_sourceLine($validator, $attribute, $rule, $sourceLocale);
-        [$line, $params] = self::_markMarkers($validator, $line, $attribute, $rule, $parameters, $classification['placeholders']);
+        // A rule Laravel ships no line for: an application's own rule object, or a closure. The
+        // text it produced is the only source there is, one entry per `$fail()`, and the listing
+        // command reports it so it can be given a real template (MSG-7).
+        return array_map(fn (string $text) => ServerMessage::make(self::_code($rule), $text, [], $attribute), $span);
+    }
 
-        return ServerMessage::make(
-            self::_code($validator, $classification['code'], $attribute, $parameters),
-            $validator->makeReplacements($line, $attribute, $rule, $parameters),
-            $params,
-            $attribute
-        );
+    /**
+     * How many of a field's messages each failed rule added. Laravel keeps them in the order the
+     * rules failed; a built-in rule adds exactly one, a rule object one per `$fail()`. With one rule
+     * object on the field, it owns every message beyond the built-ins; with several, where each
+     * one's messages start cannot be recovered, so each owns the one at its own position.
+     *
+     * @param  list<string>  $rules
+     * @return array<string, int>
+     */
+    private static function _messageSpans(array $rules, int $messages): array
+    {
+        $objects = array_values(array_filter($rules, fn (string $rule) => RuleWording::placeholders(self::_code($rule)) === null));
+        $spans = array_fill_keys($rules, 1);
+
+        if (count($objects) === 1) {
+            $spans[$objects[0]] = max(1, $messages - (count($rules) - 1));
+        }
+
+        return $spans;
+    }
+
+    /**
+     * The entry one rule produces for one field when it fails, or null for a rule Laravel ships no
+     * line for. The runtime and the build-time listing both build through here, so what a failing
+     * request sends is what the listing registered ahead of it.
+     *
+     * @param  string  $rule  As Laravel records it: `Min`, `RequiredIf`, or a rule class.
+     */
+    public static function forRule(Validator $validator, string $attribute, string $rule, array $parameters, ?string $sourceLocale = null): ?ServerMessage
+    {
+        $code = self::_code($rule);
+        $placeholders = RuleWording::placeholders($code);
+
+        if ($placeholders === null) {
+            return null;
+        }
+
+        $line = self::_sourceLine($validator, $attribute, $rule, $sourceLocale ?? config('app.fallback_locale'));
+        [$line, $params] = self::_markMarkers($validator, $line, $attribute, $rule, $parameters, $placeholders);
+
+        return ServerMessage::make($code, $validator->makeReplacements($line, $attribute, $rule, $parameters), $params, $attribute);
+    }
+
+    /**
+     * MSG-2: the code is Laravel's own name for the rule. A built-in rule is recorded in studly
+     * case (`RequiredIf`) and is the rule as written and as `validation.php` keys it
+     * (`required_if`); a rule object or a closure is recorded by its class, which is its name.
+     */
+    private static function _code(string $rule): string
+    {
+        return str_contains($rule, '\\') ? $rule : Str::snake($rule);
     }
 
     /**
@@ -149,40 +203,8 @@ final class ValidatorMessages
     }
 
     /**
-     * @param  string|array  $code  A vocabulary slug, or a bound whose code follows the field's type.
-     */
-    private static function _code(Validator $validator, $code, string $attribute, array $parameters): string
-    {
-        if (is_string($code)) {
-            return $code;
-        }
-
-        if (isset($code['variants'])) {
-            return (string) reset($code['variants']);
-        }
-
-        $type = $code['as'] ?? self::_call($validator, 'getAttributeType', [$attribute]);
-        $side = $code['bound'] === RuleWording::EITHER
-            ? self::_side($validator, $attribute, $parameters)
-            : $code['bound'];
-
-        return (string) MessageCodes::forBound($side, $type);
-    }
-
-    /**
-     * `between` and `size` do not say which side failed, so it is read off the value — structure,
-     * never the rendered text.
-     */
-    private static function _side(Validator $validator, string $attribute, array $parameters): string
-    {
-        $size = self::_call($validator, 'getSize', [$attribute, $validator->getValue($attribute)]);
-
-        return $size < (float) ($parameters[0] ?? 0) ? RuleWording::LOWER : RuleWording::UPPER;
-    }
-
-    /**
-     * Laravel keeps the pieces below protected, and a normalizer has to read the same values the
-     * validator itself would use: the message it picked, the field's type, and its size.
+     * Laravel keeps the message it picked protected, and a normalizer has to read the same line the
+     * validator itself would use.
      */
     private static function _call(Validator $validator, string $method, array $arguments)
     {
