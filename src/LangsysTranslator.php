@@ -53,6 +53,29 @@ class LangsysTranslator
         return $this->client->translate($phrase, $locale, $category, null, $params);
     }
 
+    /**
+     * `translate()` with the provenance of what it returns (FRM-8): `catalog` for a Langsys
+     * translation, `fallback` for the app's own lang-file line, `source` for the phrase itself.
+     * A raw print escapes catalog text and leaves the app's own text as Laravel prints it.
+     *
+     * @return array{text: string, from: string}
+     */
+    public function resolve(string $phrase, ?string $category = null, array $params = [], ?string $locale = null): array
+    {
+        return $this->client->resolve($phrase, LocaleDetector::normalize($locale ?? app()->getLocale()), $category, $params);
+    }
+
+    /**
+     * A source line with inline markup, translated with only the source's own elements rebuilt
+     * around the translated runs (FRM-8).
+     *
+     * @return array{html: string, from: string}
+     */
+    public function translateRich(string $sourceHtml, ?string $category = null, array $params = [], ?string $locale = null): array
+    {
+        return $this->client->translateRich($sourceHtml, LocaleDetector::normalize($locale ?? app()->getLocale()), $category, $params);
+    }
+
     public function client(): Client
     {
         return $this->client;

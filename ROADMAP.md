@@ -3,13 +3,13 @@
 Running list of deferred work and design decisions for
 `langsys/langsys-php-laravel`, so the context isn't lost between sessions.
 
-## 838: conformance to the SDK spec (8.2.20)
+## 838: conformance to the SDK spec (8.5.2)
 
 Graded row by row in `CONFORMANCE.md`. The design decisions and deferred work behind those rows are recorded here.
 
 ### Release gate — the core is untagged, and the constraint has to move at publication
 
-This branch depends on the 838 `langsys/langsys-php` core: `resetRequestState()`, `resolveRequestLocale()`, the migration mode, the server-message API, the snapshot seam, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
+This branch depends on the 838 `langsys/langsys-php` core (`b26615a`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the server-message API, the snapshot seam, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
 
 - **CI fails on this branch by design.** It installs from Packagist. Against v1.3.1, the boundary tests hit an undefined method, and the delegation probes find no fallback where the wrapper used to have one.
 - **At publication**, the constraint moves to the core's 838 tag and the local path repository (below) goes. The operator publishes every SDK at once, after all of them are green.
@@ -73,34 +73,27 @@ The core accepts a PSR-3 `logger` option, and Laravel's log manager is one. Pass
 
 The locale is Laravel's. The provider listens for Laravel's `LocaleUpdated` event and marks the request, so `DetectLocale` knows whether anything set the locale before it ran. Comparing `app()->getLocale()` against `app.locale` cannot tell, because `setLocale()` rewrites that config value, and it would miss an app that sets its default explicitly. Where the app set it, Laravel's locale is left alone and the SDK maps it for the client (`resolveRequestLocale(['framework' => …])`): an exact match, a bare language to the project's default locale for it (`default_locales`), otherwise the base locale, and offline from a loaded snapshot's locales. No `Vary` is added: the choice is the app's to vary on. Where nothing set it, `DetectLocale` reads `sources` in the app's order, validates each candidate against the project's locales narrowed by `supported` (a bare language through `default_locales` too), negotiates `Accept-Language` with the SDK, and adds the `Vary` its choice depended on. The Client is built with `send_vary => false`, so the SDK's own fallback never sends a raw `header()` that Laravel's response doesn't carry.
 
-## Laravel's translate function (FRM, spec 8.5.0)
+## Laravel's translate function (FRM)
 
 ### Decided: always on, one off switch
 
 Installed, the package answers `__()`, `trans()`, `trans_choice()` and `@lang` (FRM-1). `langsys.enabled` (`LANGSYS_ENABLED`) turns all of it off for debugging: Laravel's own translator and validator, and no entries attached. `t()` is `__()` by another name.
 
-### Held: `@t`, until catalog text is escaped
+### Decided: sync is the only registration
 
-`@t` is `@lang`'s alias, and `@lang` prints unescaped. With the catalog answering, that text is written by translators and machine translation, so `@lang` and `@t` escape text that came from the catalog and leave the app's own lang-file text raw, as Laravel does. A source line with inline markup registers as its rich-phrase tokens (`{m0o}…{m0c}`) at sync, and renders with the source's own tags rebuilt around the translated runs, so a translation can never add a tag, change an href or inject script. `{!! __() !!}` stays the developer's explicit raw choice. This needs the core to say where an answer came from, and to rebuild a rich phrase; `@t` is registered once it can escape. Until then Blade uses `{{ __() }}` and `@lang` as Laravel does.
+`__()` registers nothing while serving a request (FRM-2); `langsys:sync` registers what the app's code and lang files hold, with the lang files' translations. The page walk (`TranslateResponse`) still collects what it meets after the response. Blade is compiled for scanning by a plain `BladeCompiler`, where `@lang` and `@t` compile to Laravel's own `app('translator')->get()`, the call the core's scanner reads; the rendering compiler writes the escaping call. A compiled hit takes the line of its own call in the view — the n-th call of a function in the compiled view is its n-th in the source — because Blade drops comments and rewrites directives.
 
-### Waiting on the core (L4)
+### Open: a rule object's markers
 
-- `langsys:sync` (FRM-2, FRM-7): the core's source scanner, the three-way plan and the runtime-never-registers switch; the package supplies the command, Blade compilation and line remapping, and the lang-file configuration per locale.
-- The lang-file step of FRM-3's chain: the core's miss fallback, answered by Laravel's own translator for the request locale.
-- Until both land, `__()` still resolves catalog → source, and still queues misses at runtime.
+A rule object's `$fail()` text arrives filled, so its runtime entry is that text, while a rule object that declares `message()` is listed with its `{name}` template. The two meet only for a message with no markers. Laravel has no standard way for a rule object to hand over its params; closing it is a spec question.
+
+### Known limit: a Mailable sent during an Inertia request
+
+A notification is recognised while it is sent, through Laravel's own `NotificationSending` and `NotificationSent` events, and is always translated. A `Mailable` sent synchronously while serving an Inertia page has no event before it renders, so its `__()` calls answer as the page does, with the source. Queued mail has no request, and is translated. Laravel offers no hook before a Mailable renders; routing mail through a notification, or queueing it, avoids the limit.
 
 ## Server messages and legacy-key migration
 
 `docs/server-messages.md` is the plan and the migration guide.
-
-### Not built: `fill` mode
-
-Laravel's lang files answer wherever they have a line for the requested locale; where they do not — a JSON key with no entry in that locale, or a group key only the fallback locale has — Langsys is asked for the sentence, renders the translation when it has one, and otherwise shows the source text and registers it. A hybrid, deliberately and explicitly: it acts only where Laravel had no translation to give, so a line an application translated keeps coming from that line. Two constraints shape it:
-
-- **Laravel's `handleMissingKeysUsing()` is not enough.** It fires only when a key is missing from every locale. When `es` lacks a line `en` has, Laravel serves the English one and the hook never runs, so fill mode needs the translator subclass to see a gap in the requested locale.
-- **A validation line cannot be filled as a plain line.** Laravel translates `The :attribute field is required.` and substitutes the label after, the agreement defect MSG-3 removes. A missing validation line is built the migrate-mode way — label written in, then looked up.
-
-Text fill mode prints translated inline needs the resolved marker (GATE-10), so it follows the marker directive.
 
 ### Not built: two guards
 

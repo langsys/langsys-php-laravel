@@ -67,36 +67,27 @@ class MigrateModeTest extends TestCase
     }
 
     /** MSG-8: a template the catalog does not list is queued, and sent after the response. */
-    public function testATemplateTheCatalogLacksIsQueuedForRegistration(): void
+    /** FRM-2: a failed validation registers nothing at runtime; `langsys:sync` registers templates. */
+    public function testAFailureRegistersNothingAtRuntime(): void
     {
-        $client = $this->offlineClient(['es-es' => ['Errors' => ['Another sentence.' => 'Otra frase.']]]);
-        $this->app->instance(Client::class, $client);
+        config()->set('langsys.api_url', self::UNREACHABLE_API);
+        $this->app->forgetInstance(Client::class);
+        $this->seedCatalog('es-es', ['Errors' => ['Another sentence.' => 'Otra frase.']]);
         $this->app->setLocale('es-ES');
 
         $this->_failing();
 
-        $this->assertSame(
-            [['phrase' => self::TEMPLATE, 'category' => 'Errors']],
-            array_values(array_map(fn (array $queued) => ['phrase' => $queued['phrase'], 'category' => $queued['category']], $client->getPendingPhrases()))
-        );
+        $this->assertSame([], $this->app->make(Client::class)->getPendingPhrases());
     }
 
     /** MSG-6: registration uses the configured category, on the client the provider builds. */
-    public function testTheConfiguredCategoryIsWhereTemplatesAreRegistered(): void
+    /** MSG-6: the configured category is the core's messages category, where templates are looked up and synced. */
+    public function testTheConfiguredCategoryIsTheCoresMessagesCategory(): void
     {
         config()->set('langsys.messages.category', 'Validation');
-        config()->set('langsys.api_url', self::UNREACHABLE_API);
         $this->app->forgetInstance(Client::class);
-        $this->app->make(Client::class);
-        $this->seedCatalog('es-es', ['Validation' => ['Another sentence.' => 'Otra frase.']]);
-        $this->app->setLocale('es-ES');
 
-        $this->_failing();
-
-        $this->assertSame(
-            ['Validation'],
-            array_values(array_unique(array_column($this->app->make(Client::class)->getPendingPhrases(), 'category')))
-        );
+        $this->assertSame('Validation', $this->app->make(Client::class)->getConfig()->getMessagesCategory());
     }
 
     /** A translation layer must never be the reason a form breaks. */

@@ -53,6 +53,6 @@ class MiddlewareRegistrationTest extends TestCase
 
     public function testOnlyGroupsTheApplicationDefinesAreAppendedTo(): void
     {
-        $this->assertSame(['web' => [AttachServerMessages::class]], self::$kernel->groups);
+        $this->assertSame(['web' => [AttachServerMessages::class, \Langsys\Laravel\Http\Middleware\MarkResolvedPage::class]], self::$kernel->groups);
     }
 }

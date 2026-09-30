@@ -32,6 +32,8 @@ class FakeClient extends Client
         parent::__construct('test-key', 'test-project', [
             'api_url'      => 'http://127.0.0.1:9',
             'cache_driver' => 'none',
+            // As the provider builds it: `__()` registers nothing at runtime (FRM-2).
+            'runtime_registration' => false,
         ]);
     }
 

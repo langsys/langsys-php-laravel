@@ -56,22 +56,29 @@ class BindingBoundaryTest extends TestCase
      */
     private const PUBLIC_SURFACE = [
         'Langsys\\Laravel\\Cache\\LaravelCacheAdapter'                  => ['__construct', 'clear', 'delete', 'get', 'has', 'set'],
+        'Langsys\\Laravel\\Console\\CacheCommand'                       => ['handle'],
+        'Langsys\\Laravel\\Console\\ClearCommand'                       => ['handle'],
         'Langsys\\Laravel\\Console\\MessagesCommand'                    => ['handle'],
+        'Langsys\\Laravel\\Console\\SyncCommand'                        => ['handle'],
         'Langsys\\Laravel\\Facades\\Langsys'                            => [],
         'Langsys\\Laravel\\Http\\Middleware\\AttachServerMessages'      => ['handle'],
         'Langsys\\Laravel\\Http\\Middleware\\DetectLocale'              => ['__construct', 'handle'],
         'Langsys\\Laravel\\Http\\Middleware\\FlushPendingRegistrations' => ['__construct', 'handle', 'terminate'],
+        'Langsys\\Laravel\\Http\\Middleware\\MarkResolvedPage'          => ['handle'],
         'Langsys\\Laravel\\Http\\Middleware\\TranslateResponse'         => ['__construct', 'handle'],
+        'Langsys\\Laravel\\Http\\ResponseKind'                         => ['current', 'of', 'sending', 'sent'],
         'Langsys\\Laravel\\LangsysServiceProvider'                      => ['boot', 'register'],
-        'Langsys\\Laravel\\LangsysTranslator'                           => ['__construct', 'client', 'translate'],
+        'Langsys\\Laravel\\LangsysTranslator'                           => ['__construct', 'client', 'resolve', 'translate', 'translateRich'],
         'Langsys\\Laravel\\Messages\\RuleWording'                       => ['placeholders'],
         'Langsys\\Laravel\\Messages\\MessageValidator'                   => ['passes', 'serverMessages'],
         'Langsys\\Laravel\\Messages\\FormRequestSource'                  => ['__construct', 'collect', 'fromRoutes'],
         'Langsys\\Laravel\\Messages\\ValidatorMessages'                  => ['forRule', 'fromValidator'],
         'Langsys\\Laravel\\Support\\InertiaSsrProps'                    => ['share'],
+        'Langsys\\Laravel\\Support\\LaravelLocales'                     => ['candidates', 'inLangPath'],
         'Langsys\\Laravel\\Support\\LocaleFormatter'                    => ['canonicalize'],
         'Langsys\\Laravel\\Support\\RequestLocaleWiring'                => ['headerOnly', 'options'],
-        'Langsys\\Laravel\\Translation\\CatalogTranslator'              => ['__construct', 'choice', 'get', 'has'],
+        'Langsys\\Laravel\\Support\\ValueSetDiscovery'                  => ['cache', 'cachePath', 'classes', 'clear', 'isDeclaration', 'within'],
+        'Langsys\\Laravel\\Translation\\CatalogTranslator'              => ['__construct', 'choice', 'fallbackLine', 'get', 'getHtml', 'has'],
         'Langsys\\Laravel\\Translation\\MigrationFiles'                 => ['for'],
     ];
 
@@ -98,11 +105,14 @@ class BindingBoundaryTest extends TestCase
         'messages.pieces'             => 'the names of an entry\'s pieces in the application\'s own error body (MSG-1)',
         'messages.response_key'       => 'where the entries sit in the application\'s own error body (MSG-1)',
         'project_id'                  => 'core option',
+        'response_kinds'              => 'FRM-4 wiring: the kind of response a route group serves, when the app names it',
         'snapshot'                    => "core `snapshot` option, the file Laravel's config names (SNAP-2)",
+        'sync_paths'                  => 'FRM-2 wiring: where the app keeps the source langsys:sync reads',
         'translate_response.category' => 'the $category argument of translatePage()',
         'translate_response.enabled'  => 'whether Laravel invokes translatePage()',
         'translate_response.except'   => 'on which routes Laravel invokes translatePage()',
         'translate_response.only'     => 'on which routes Laravel invokes translatePage()',
+        'value_sets'                  => "the core's `value_sets` option: declared sets kept outside app/ (FRM-7)",
     ];
 
     public function testTheBindingNeverTouchesServerComputedCapability(): void

@@ -21,11 +21,6 @@ class InertiaHandoffTest extends TestCase
         return [InertiaServiceProvider::class, ...parent::getPackageProviders($app)];
     }
 
-    protected function defineEnvironment($app): void
-    {
-        parent::defineEnvironment($app);
-    }
-
     protected function setUp(): void
     {
         parent::setUp();

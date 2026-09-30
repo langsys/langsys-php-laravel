@@ -7,9 +7,9 @@ return [
     | Langsys project credentials
     |--------------------------------------------------------------------------
     |
-    | Use a WRITE key in development so new phrases and content blocks are
-    | auto-registered as your views render, and a READ-ONLY key in production.
-    | The key type is detected server-side — there is no local toggle.
+    | `php artisan langsys:sync` needs a WRITE key to register your phrases;
+    | serve with a READ-ONLY key. The key type is detected server-side — there
+    | is no local toggle.
     |
     */
 
@@ -32,6 +32,54 @@ return [
     */
 
     'enabled' => env('LANGSYS_ENABLED', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Response kinds
+    |--------------------------------------------------------------------------
+    |
+    | What `__()` returns depends on who reads the response next. A page the
+    | server renders gets the translation; an Inertia page gets the source,
+    | because its own browser SDK translates it; mail and notifications always
+    | get the translation, in the recipient's language. This is read from
+    | Laravel's own structure. Name a route group here to decide it yourself:
+    | 'auto', 'server' or 'client', e.g. ['admin' => 'server'].
+    |
+    */
+
+    'response_kinds' => [],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Declared value sets
+    |--------------------------------------------------------------------------
+    |
+    | A sentence that names a translatable value — a status, a category — is
+    | registered once per value, with the word written in, so it is translated
+    | whole: `The order is Shipped.` A backed enum marked
+    | #[\Langsys\SDK\Messages\TranslatesAs('status')], and any class
+    | implementing \Langsys\SDK\Messages\TranslatableValues, is found in
+    | app/ without listing it. List classes kept elsewhere here.
+    |
+    */
+
+    'value_sets' => [],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sync
+    |--------------------------------------------------------------------------
+    |
+    | `php artisan langsys:sync` registers every literal `__()`, `trans()`,
+    | `trans_choice()`, `@lang` and `t()` in your PHP and Blade, and every line
+    | of your base-language files, with the translations your other lang
+    | files already have. Nothing registers while serving a request. It reads
+    | app/, routes/ and resources/views/; list other directories here to
+    | replace them.
+    |
+    */
+
+    'sync_paths' => [],
 
     /*
     |--------------------------------------------------------------------------
@@ -127,15 +175,16 @@ return [
     |
     | Opt-in. Applies the `langsys.translate-page` middleware to translate every
     | text node and translatable attribute of a rendered HTML response, with no
-    | `@t` tagging. This is the only way to cover text Alpine injects from a JS
+    | `__()` needed. This is the only way to cover text Alpine injects from a JS
     | expression (`x-text="'Save changes'"`), which never becomes a DOM node you
     | can wrap.
     |
-    | PICK ONE MODE PER PROJECT — automatic OR `@t` tagging, never both. If both
-    | run, this middleware re-walks nodes `@t` already translated, looks the
-    | TRANSLATED string up as a source phrase, misses, and registers it: a
-    | Spanish "Guardar" enters the catalog every Langsys SDK shares as though it
-    | were source text. Mark any already-resolved subtree `translate="no"`.
+    | PICK ONE PER ROUTE — this, OR text translated through `__()` / `@lang`,
+    | never both. If both run, this middleware re-walks text `__()` already
+    | translated, looks the TRANSLATED string up as a source phrase, misses, and
+    | registers it: a Spanish "Guardar" enters the catalog every Langsys SDK
+    | shares as though it were source text. Mark any already-resolved subtree
+    | `translate="no"`.
     |
     | If you server-render with this AND hydrate with a Langsys JS SDK, pair it
     | with a JS version whose tokenizer recognises `data-langsys-phrase`; older

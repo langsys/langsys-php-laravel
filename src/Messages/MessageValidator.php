@@ -9,19 +9,18 @@ use Langsys\SDK\Messages\ServerMessage;
 use Throwable;
 
 /**
- * The validator Laravel builds in migrate mode.
+ * The validator Laravel builds with Langsys installed.
  *
  * **It never changes what Laravel renders.** The message bag keeps Laravel's own sentences, in the
  * source language, so `$errors`, `@error`, the 422 body and Livewire are untouched. What this adds
- * is structure and registration: one entry per failed rule, built from the rule rather than from
- * the rendered string (MSG-9), and a template the catalog does not list is registered after the
- * response on the existing flush path (MSG-8).
+ * is structure: one entry per failed rule, built from the rule rather than from the rendered
+ * string (MSG-9). Registration is `langsys:sync`'s; the one runtime registration is a sentence
+ * built from a declared value the last sync did not see, sent after the response (FRM-7, MSG-8).
  *
- * **The server never emits Langsys-translated text as part of this feature.** The server registers
- * source phrases, the API machine-translates them, and the client renders `entry.template` through
- * `t()` (MSG-5), falling back to `entry.message` — which is the base-locale fill, never a
- * translation. Translating here would put translated text where every reader expects source text,
- * starting with a client SDK that would then register it as a new phrase.
+ * **Every entry built here is source.** A client renders `entry.template` through its own SDK
+ * (MSG-5); only a JSON response's `message` is put in the request's language, by
+ * `AttachServerMessages` (FRM-5). Translating here would put translated text where a redirect's
+ * reader expects source text, starting with a client SDK that would look it up as a phrase.
  *
  * @internal
  */

@@ -22,6 +22,7 @@ These three are in the code at this tip because the binding rules call for them,
 ### Added — server messages, in progress
 
 Spec 8.1.0's MSG family, against the core's `Langsys\SDK\Messages`. Validation failures become entries a client can translate, without an application writing anything of ours.
+- **What `__()` returns follows the response (FRM-4).** A page the server renders gets the translation; an Inertia page, recognised by Inertia's own middleware on the route or an Inertia visit, gets the source, because its own browser SDK translates it; a notification is always translated in the recipient's `preferredLocale()`, even when sent while serving an Inertia page, and queued ones too. `langsys.response_kinds` names the kind per route group (`auto`, `server`, `client`).
 
 - **`langsys.localization` (`LANGSYS_LOCALIZATION`)** picks the mode. **`keep` is the default and changes nothing**: Laravel's validator, Laravel's wording, Laravel's 422 body, and nothing sent to Langsys.
 - **`migrate`** builds an entry from each rule that failed — never by reading back the rendered message — with the field's label written into Laravel's own sentence and values kept outside it as `{name}` markers, so each sentence is translated whole and agrees.
@@ -38,10 +39,15 @@ Spec 8.1.0's MSG family, against the core's `Langsys\SDK\Messages`. Validation f
 
 - **`php artisan langsys:messages`** lists every validation message your FormRequests can send, built exactly as a failing request builds it, and names what it cannot list with the fix. `--register` registers what the Langsys catalog lacks; `--strict` fails the build on any problem (by default it reports and exits 0). It also names each validated field with no declared label, with the name Laravel prints instead, and in migrate mode the lang-file lines the migration cannot convert.
 
-Not built yet: `fill` mode.
 
 ### Added
 
+- **`php artisan langsys:sync`** registers every phrase the app can show — every literal `__()`, `trans()`, `trans_choice()`, `@lang` and `t()` in PHP and Blade, every base-language line, every declared value, every validation message — with the translations your other lang files already have, and nothing it cannot read as a literal, which it reports with its file and line. `--dry-run`, `--strict` for CI, `--watch` for development. Nothing registers while serving a request.
+- **`__()` answers from the catalog, then your lang files, then the source.** With nothing in the catalog it returns exactly what Laravel does.
+- **`@lang` and `@t` escape catalog text.** A translation can never add markup: a line with inline tags is rebuilt from the source's own elements around the translated words. Your own lang files' text prints as Laravel prints it; `{!! __() !!}` stays your explicit raw choice.
+- **Declared value sets.** A backed enum marked `#[TranslatesAs('status')]`, or a class implementing `TranslatableValues`, is found in app/ automatically; a sentence naming one of its values is registered and translated whole, one per value. `php artisan langsys:cache` caches what was found, and `optimize` runs it.
+- **A page Laravel renders in a translated locale is marked `data-ls-resolved`**, so a browser SDK on it never reads that text as source.
+- **laravel-data request DTOs** are listed for their validation messages as FormRequests are, and a rule object that declares `message()` is listed once per field.
 - **`langsys.snapshot` (`LANGSYS_SNAPSHOT`)** seeds the client from a catalog snapshot exported from Langsys, so a render has translations with no API call; a phrase the snapshot lacks falls back to the live catalog. A snapshot that fails to load (edited by hand, or not a snapshot) is reported and skipped.
 
 ### Changed
@@ -61,9 +67,11 @@ Not built yet: `fill` mode.
 
 ### Testing
 
-- **`CONFORMANCE.md`** grades this package against all 114 rule ids of SDK spec 8.2.20, each row naming its evidence.
+- **`CONFORMANCE.md`** grades this package against all 129 rule ids of SDK spec 8.5.2, each row naming its evidence.
 - **`BindingBoundaryTest`** — absence probes for delegated behaviour (capability, network, identity and rendering constructs), each with a firing control; the public and config surfaces are pinned.
 - **`RequestScopeTest`** — every long-lived boundary (queue job finished, queue job threw, Octane request), asserting what the *next* unit of work observes on the real SDK.
+- **Contract tests** run the provider-built client over real HTTP against the fleet's shared API double, `tests/contract-fixture/`, vendored byte for byte from langsys-js-typescript (tree `542f57f5`) and started per test class with Node. They read back what the server accepted: a server render's served translation and its miss registered after the response; a key that may not write registering nothing even when the world changes to accept it, with the positive control; the request locale validated against the locales the server says the project serves.
+- **`tests/Fixtures/inertia/failed-form-page.json`**, written by a test, is the Inertia page object after a failed form redirect, Inertia's own `errors` beside `langsys_errors`, for the Vue binding to vendor.
 - **`TestCase::offlineClient()`** — the real SDK client, catalogs seeded into the Laravel cache and the API on a closed local port, for evidence that has to be the SDK's own code path.
 - Every guard above was checked by mutation: breaking it reddens a named test.
 

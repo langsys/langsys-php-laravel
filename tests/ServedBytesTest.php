@@ -24,51 +24,44 @@ class ServedBytesTest extends TestCase
         $this->app->instance(Client::class, $this->client);
     }
 
+    protected function defineEnvironment($app): void
+    {
+        parent::defineEnvironment($app);
+        $app['config']->set('langsys.translate_response.enabled', true);
+    }
+
     protected function defineRoutes($router): void
     {
         $router->middleware(['web', 'langsys.locale'])->get('/pricing', fn () => Blade::render(
-            "<h1>{{ __('Pricing') }}</h1><p>{{ __('Talk to sales') }}</p>"
+            "<html><body><h1>{{ __('Pricing') }}</h1><p>{{ __('Talk to sales') }}</p></body></html>"
         ));
+
+        $router->middleware(['web', 'langsys.locale', 'langsys.translate-page'])->get('/walk', fn () => '<html><body>'
+            . str_repeat('<section><div><p>Talk to sales</p></div></section>', 8) . '</body></html>');
     }
 
     /**
-     * The request locale's translation is in the response, and a phrase the
-     * catalog lacks is served in the base language AND queued as a miss —
-     * which separates "translated correctly" from "rendered a catalog that
-     * happened to be complete".
+     * The request locale's translation is in the response, and a phrase the catalog lacks is
+     * served in the base language — which separates "translated correctly" from "rendered a
+     * catalog that happened to be complete". The page, rendered in a non-base locale, is marked
+     * resolved (GATE-10).
      */
     public function testTheServedBytesCarryTheRequestLocalesTranslations(): void
     {
         $this->get('/pricing?locale=it-IT')
             ->assertOk()
-            ->assertSee('<h1>Prezzi</h1>', false)
-            ->assertSee('<p>Talk to sales</p>', false);
-
-        $queued = array_column($this->client->getPendingPhrases(), 'phrase');
-
-        $this->assertContains('Talk to sales', $queued, 'Control: the miss must be queued, or nothing here shows discovery ran.');
-        $this->assertNotContains('Pricing', $queued);
+            ->assertSee('<html data-ls-resolved="it-it"><body><h1>Prezzi</h1><p>Talk to sales</p></body></html>', false);
     }
 
     /**
-     * SRV-5, once per subtree: one phrase rendered eight times across three
-     * nested loops is one registration. Asserted as a count, because the
-     * copies a re-entrant render produces are identical and a set hides them.
+     * SRV-5, once per subtree, on the page walk, which still collects what it meets: one phrase
+     * met eight times across nested elements is one registration. Asserted as a count, because
+     * identical copies are exactly what a set would hide.
      */
-    public function testAMissRenderedManyTimesIsQueuedOnce(): void
+    public function testAMissTheWalkMeetsManyTimesIsQueuedOnce(): void
     {
-        $this->app->setLocale('it-IT');
+        $this->get('/walk?locale=it-IT')->assertOk();
 
-        Blade::render(<<<'BLADE'
-            @foreach ([1, 2] as $a)
-                @foreach ([1, 2] as $b)
-                    @foreach ([1, 2] as $c)
-                        {{ __('Talk to sales') }}
-                    @endforeach
-                @endforeach
-            @endforeach
-            BLADE);
-
-        $this->assertCount(1, $this->client->getPendingPhrases());
+        $this->assertSame(['Talk to sales'], array_values(array_column($this->client->getPendingPhrases(), 'phrase')));
     }
 }

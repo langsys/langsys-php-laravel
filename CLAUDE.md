@@ -27,10 +27,11 @@ There is no linter or static-analysis config in this repo.
 
 ## Architecture
 
-The call path for every translation is: **`t()` / `@t` → `LangsysTranslator` → SDK `Client` → `Interpolator`.**
+The call path for every translation is: **`__()` / `trans()` / `trans_choice()` / `@lang` → `Translation\CatalogTranslator` (Laravel's `translator`, extended) → `LangsysTranslator` → SDK `Client` → `Interpolator`.** `t()` is `__()` by another name. Installed, the package is always on (FRM-1); `langsys.enabled` is the one off switch, and off means plain Laravel.
 
-- `src/helpers.php` — global `t($phrase, $category?, $params?, $locale?)`, guarded by `function_exists`. Autoloaded via composer `files`.
-- `src/LangsysServiceProvider.php` — wires everything: builds the `Client` singleton from `config/langsys.php` with a `LaravelCacheAdapter`, compiles `@t` to `e(t(...))`, registers the `langsys.locale` / `langsys.flush` / `langsys.translate-page` middleware aliases, exempts the locale cookie from `EncryptCookies`, and ends the request scope at every long-lived boundary (Octane `RequestTerminated`, queue `JobProcessed` / `JobExceptionOccurred`).
+- `src/helpers.php` — global `t($key, $replace, $locale)`, `__()` by another name, guarded by `function_exists`. Autoloaded via composer `files`.
+- `src/Translation/CatalogTranslator.php` — Laravel's translator with Langsys installed: keys resolve through the core's `resolve()` against Laravel's own base-language files (`MigrationFiles`), a catalog miss falls back to the app's own lang file for the locale (`fallbackLine()`, the core's miss fallback), a sentence passed as its own key is converted by the core's `LegacyValue::fromCall()`, `validation.*` stays with Laravel, and an Inertia page gets the source (`Http\ResponseKind`, FRM-4).
+- `src/LangsysServiceProvider.php` — wires everything: builds the `Client` singleton from `config/langsys.php` with a `LaravelCacheAdapter`, extends Laravel's `translator`, installs the validator resolver and the `AttachServerMessages` response middleware, registers the `langsys.locale` / `langsys.flush` / `langsys.translate-page` middleware aliases, exempts the locale cookie from `EncryptCookies`, and ends the request scope at every long-lived boundary (Octane `RequestTerminated`, queue `JobProcessed` / `JobExceptionOccurred`).
 - `src/LangsysTranslator.php` — **the single mockable seam.** The SDK's cURL layer is concrete and non-injectable, so app tests fake this or bind a fake `Client`; never stub HTTP.
 - `src/Support/LocaleFormatter.php` — canonical BCP 47 (`es-ES`), for **Laravel's own locale store only** (`app()->setLocale()`). Both SDKs identify a locale by lowercase `xx-yy` (WIRE-3), so every SDK boundary — the Inertia hand-off included — uses `LocaleDetector::normalize()`. `Client::setLocale()` normalizes; `Client::translate()` and `getTranslations()` do **not**, and key their catalog by the string they are handed, so the wrapper normalizes before those calls. Getting these two forms backwards is the recurring bug in this codebase.
 
@@ -50,11 +51,11 @@ The SDK interpolates on its own degraded paths too, so a failure never renders a
 
 ### Coverage model — two modes, never both
 
-**Tagged mode (default):** only strings wrapped in `t()` / `@t` are translated. Coverage equals your tagging.
+**Tagged mode (default):** only text that goes through Laravel's translate function (`__()`, `@lang`, `t()`) is translated. Coverage equals your tagging. `@lang` and `@t` print through `CatalogTranslator::getHtml()`: catalog text is escaped, lang-file text raw, rich lines rebuilt by the core (FRM-8). Registration happens only through `php artisan langsys:sync` (FRM-2).
 
-**Automatic mode (opt-in):** the `langsys.translate-page` middleware (`TranslateResponse`) runs `translatePage()` over the rendered HTML response. Covers everything, including the Alpine dynamic-attribute text `@t` structurally cannot reach.
+**Automatic mode (opt-in):** the `langsys.translate-page` middleware (`TranslateResponse`) runs `translatePage()` over the rendered HTML response. Covers everything, including the Alpine dynamic-attribute text `__()` structurally cannot reach.
 
-**A project picks one.** Running both makes the middleware re-walk `@t`-translated nodes, look the *translated* string up as a source phrase, miss, and register it — poisoning the catalog every Langsys SDK shares with translated strings posing as source text. `translate="no"` is the per-subtree escape hatch; do not invent a wrapper-side skip marker.
+**A project picks one.** Running both makes the middleware re-walk `__()`-translated nodes, look the *translated* string up as a source phrase, miss, and register it — poisoning the catalog every Langsys SDK shares with translated strings posing as source text. `translate="no"` is the per-subtree escape hatch; do not invent a wrapper-side skip marker.
 
 `TranslateResponse` decides only **whether** to call `translatePage()` and **what to hand it** — never what inside the HTML gets translated. Registration flushes after the response like tagged mode (upstream ^1.3; it was inline before). The one thing it doesn't share: PHP SSR + JS hydration requires `langsys-js-typescript` ≥0.6.2, whose tokenizer knows `data-langsys-phrase`. See `ROADMAP.md` before changing this middleware.
 

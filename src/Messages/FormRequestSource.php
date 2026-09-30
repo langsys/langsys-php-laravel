@@ -18,7 +18,7 @@ use Throwable;
  * Every validation message the application's FormRequests can send, listed from the code (MSG-7):
  * each rule of each FormRequest a route's controller action takes, built by `ValidatorMessages`
  * exactly as a failing request builds it. What cannot be listed ahead of time is reported with its
- * fix; it still registers the first time it is sent (MSG-8).
+ * fix; until it is fixed it is shown in the source language, since nothing registers at runtime.
  */
 final class FormRequestSource implements MessageSource
 {
@@ -48,13 +48,20 @@ final class FormRequestSource implements MessageSource
             foreach ((new ReflectionMethod($controller, $method))->getParameters() as $parameter) {
                 $type = $parameter->getType();
 
-                if ($type instanceof ReflectionNamedType && is_subclass_of($type->getName(), FormRequest::class)) {
+                if ($type instanceof ReflectionNamedType && self::_isRequest($type->getName())) {
                     $classes[$type->getName()] = true;
                 }
             }
         }
 
         return new self(array_keys($classes));
+    }
+
+    /** A FormRequest, or a laravel-data request DTO: the two ways Laravel apps declare a request's rules. */
+    private static function _isRequest(string $class): bool
+    {
+        return is_subclass_of($class, FormRequest::class)
+            || (class_exists(\Spatie\LaravelData\Data::class) && is_subclass_of($class, \Spatie\LaravelData\Data::class));
     }
 
     public function collect(MessageCatalog $catalog)
@@ -97,7 +104,7 @@ final class FormRequestSource implements MessageSource
 
         foreach ((new ValidationRuleParser($data))->explode([$attribute => $fieldRules])->rules[$attribute] ?? [] as $rule) {
             if (!is_string($rule)) {
-                $catalog->problem($source, 'uses the rule object ' . get_class($rule) . ', which declares no template', 'its message registers the first time it is sent', $field);
+                $this->_collectRuleObject($catalog, $source, $field, $attribute, $rule, Validator::make($data, $rules, $messages, $attributes));
 
                 continue;
             }
@@ -127,6 +134,29 @@ final class FormRequestSource implements MessageSource
     }
 
     /**
+     * A rule object that declares its message — Laravel's `Rule` contract, `message()` — is listed
+     * once per field, the field's label written in by Laravel's own replacer. One that only calls
+     * `$fail()` has no message to read ahead of time.
+     */
+    private function _collectRuleObject(MessageCatalog $catalog, string $source, string $field, string $attribute, object $rule, \Illuminate\Validation\Validator $validator): void
+    {
+        $rule = $rule instanceof \Illuminate\Validation\InvokableValidationRule ? $rule->invokable() : $rule;
+
+        $messages = method_exists($rule, 'message') ? array_filter((array) $rule->message(), 'is_string') : [];
+
+        // `Password` implements the contract too, but only knows its message once it has failed.
+        if ($messages === []) {
+            $catalog->problem($source, 'uses the rule object ' . get_class($rule) . ', which declares no message', "give it a message() returning its sentence, with :attribute for the field's label", $field);
+
+            return;
+        }
+
+        foreach ($messages as $message) {
+            $catalog->add($validator->makeReplacements((string) $message, $attribute, get_class($rule), []), $source, $field);
+        }
+    }
+
+    /**
      * A FormRequest's rules, messages and labels, read without a request: the container does not
      * resolve it, since resolving validates.
      *
@@ -134,11 +164,52 @@ final class FormRequestSource implements MessageSource
      */
     private static function _declared(string $class): array
     {
+        if (!is_subclass_of($class, FormRequest::class)) {
+            return self::_dataDeclared($class);
+        }
+
         $request = new $class();
         $request->setContainer(app())->setRedirector(app('redirect'));
 
         $call = fn (string $method) => method_exists($request, $method) ? (array) app()->call([$request, $method]) : [];
 
         return [$call('rules'), $call('messages'), $call('attributes')];
+    }
+
+    /**
+     * A laravel-data request DTO's rules, messages and labels, resolved by laravel-data itself
+     * against a payload carrying every nested object and collection, so their rules are listed
+     * too: laravel-data only resolves a nested object's rules when the payload has it.
+     *
+     * @return array{0: array, 1: array, 2: array}
+     */
+    private static function _dataDeclared(string $class): array
+    {
+        $payload = self::_samplePayload($class);
+        $path = \Spatie\LaravelData\Support\Validation\ValidationPath::create();
+        $rules = app(\Spatie\LaravelData\Resolvers\DataValidationRulesResolver::class)
+            ->execute($class, $payload, $path, \Spatie\LaravelData\Support\Validation\DataRules::create());
+        $declared = app(\Spatie\LaravelData\Resolvers\DataValidationMessagesAndAttributesResolver::class)->execute($class, $payload, $path);
+
+        return [$rules, $declared['messages'] ?? [], $declared['attributes'] ?? []];
+    }
+
+    /** @param  list<class-string>  $chain  The classes above this one, so a recursive DTO stops. */
+    private static function _samplePayload(string $class, array $chain = []): array
+    {
+        $payload = [];
+
+        foreach (app(\Spatie\LaravelData\Support\DataConfig::class)->getDataClass($class)->properties as $property) {
+            $nested = $property->type->dataClass;
+
+            $payload[$property->inputMappedName ?? $property->name] = match (true) {
+                $nested !== null && in_array($nested, $chain, true)             => null,
+                $property->type->kind->isDataObject()                           => self::_samplePayload($nested, [...$chain, $class]),
+                $property->type->kind->isDataCollectable() && $nested !== null => [self::_samplePayload($nested, [...$chain, $class])],
+                default                                                         => 'sample',
+            };
+        }
+
+        return $payload;
     }
 }

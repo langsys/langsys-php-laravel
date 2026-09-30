@@ -48,11 +48,6 @@ class CatalogTranslatorTest extends TestCase
         return array_values($this->app->make(Client::class)->getPendingPhrases());
     }
 
-    private function _queuedPhrases(): array
-    {
-        return array_column($this->_queued(), 'phrase');
-    }
-
     public function testAGroupKeyRendersTheCatalogTranslationOfItsSourceLine(): void
     {
         $this->seedCatalog('es-es', ['messages' => ['Welcome back, {name}' => 'Hola de nuevo, {name}']]);
@@ -62,12 +57,13 @@ class CatalogTranslatorTest extends TestCase
         $this->assertSame('Hola de nuevo, Ana', trans('messages.welcome', ['name' => 'Ana']));
     }
 
-    public function testAMissRegistersTheSourceLineUnderTheGroupNeverTheKey(): void
+    /** MIG-3: the phrase is the source line under its group, never the key. */
+    public function testTheKeyIsNeverThePhrase(): void
     {
+        $this->seedCatalog('es-es', ['messages' => ['messages.welcome' => 'Wrong: the key was looked up']]);
         $this->app->setLocale('es-ES');
 
         $this->assertSame('Welcome back, Ana', __('messages.welcome', ['name' => 'Ana']));
-        $this->assertSame([['phrase' => 'Welcome back, {name}', 'category' => 'messages']], $this->_queued());
     }
 
     public function testANestedKeyResolvesByPath(): void
@@ -78,7 +74,9 @@ class CatalogTranslatorTest extends TestCase
     public function testAJsonKeyResolvesToItsLine(): void
     {
         $this->assertSame('Save changes', __('Save'));
-        $this->assertSame(['Save changes'], $this->_queuedPhrases());
+
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Save changes' => 'Guardar cambios']]);
+        $this->assertSame('Guardar cambios', __('Save', [], 'es-ES'), 'The line is the phrase looked up.');
     }
 
     /**
@@ -86,10 +84,12 @@ class CatalogTranslatorTest extends TestCase
      * so a sentence no file holds is converted the same way a file's line is: `:name` is a Langsys
      * `{name}`, and the phrase every SDK shares carries no Laravel-only placeholder.
      */
-    public function testASentenceNoFileHoldsIsConvertedAndRegisteredAsWritten(): void
+    public function testASentenceNoFileHoldsIsConverted(): void
     {
         $this->assertSame('Hello Ana', __('Hello :name', ['name' => 'Ana']));
-        $this->assertSame(['Hello {name}'], $this->_queuedPhrases());
+
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Hello {name}' => 'Hola {name}']]);
+        $this->assertSame('Hola Ana', __('Hello :name', ['name' => 'Ana'], 'es-ES'), 'The phrase looked up is `Hello {name}`.');
     }
 
     /**
@@ -101,11 +101,13 @@ class CatalogTranslatorTest extends TestCase
         $this->assertSame('Note:done', __('Note:done'));
         $this->assertSame('Hello :name', __('Hello :name'));
         $this->assertSame('a | b', __('a | b'));
-        $this->assertSame(['Note:done', 'Hello :name', 'a | b'], $this->_queuedPhrases());
+
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Note:done' => 'Nota:hecho', 'Hello :name' => 'Hola :name', 'a | b' => 'a o b']]);
+        $this->assertSame(['Nota:hecho', 'Hola :name', 'a o b'], [__('Note:done', [], 'es-ES'), __('Hello :name', [], 'es-ES'), __('a | b', [], 'es-ES')], 'Each is looked up as written.');
     }
 
     /** `:Name` upper-cases a value in Laravel, which `{name}` cannot say: registered verbatim, with a warning. */
-    public function testACapitalisingPlaceholderIsRegisteredAsWrittenAndWarned(): void
+    public function testACapitalisingPlaceholderIsLookedUpAsWrittenAndWarned(): void
     {
         $client = $this->app->make(Client::class);
         $logger = new class implements LoggerInterface {
@@ -118,9 +120,9 @@ class CatalogTranslatorTest extends TestCase
         };
         (new \ReflectionProperty(Client::class, 'logger'))->setValue($client, $logger);
 
-        __('Hello :Name', ['name' => 'ana']);
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Hello :Name' => 'Hola :Name']]);
 
-        $this->assertSame(['Hello :Name'], $this->_queuedPhrases());
+        $this->assertSame('Hola :Name', __('Hello :Name', ['name' => 'ana'], 'es-ES'), 'Looked up as written.');
         $this->assertCount(1, $logger->warnings);
         $this->assertStringContainsString(':Name', $logger->warnings[0]);
     }
@@ -129,10 +131,10 @@ class CatalogTranslatorTest extends TestCase
     {
         $this->assertSame('These credentials do not match our records.', __('auth.failed'));
         $this->assertSame('Slow down.', __('auth.throttle'), "The app's own line overrides the framework's.");
-        $this->assertSame([
-            ['phrase' => 'These credentials do not match our records.', 'category' => 'auth'],
-            ['phrase' => 'Slow down.', 'category' => 'auth'],
-        ], $this->_queued());
+
+        $this->seedCatalog('es-es', ['auth' => ['These credentials do not match our records.' => 'Credenciales incorrectas.', 'Slow down.' => 'Más despacio.']]);
+        $this->assertSame('Credenciales incorrectas.', __('auth.failed', [], 'es-ES'), 'Looked up under the group.');
+        $this->assertSame('Más despacio.', __('auth.throttle', [], 'es-ES'));
     }
 
     public function testAPackageKeyResolvesThroughItsNamespaceWithTheAppsOverride(): void
@@ -157,8 +159,9 @@ class CatalogTranslatorTest extends TestCase
 
         $this->assertSame('The name is needed.', trans_choice('validation.required', 1, ['attribute' => 'name']));
 
-        $this->assertNotContains('The :attribute is needed.', $this->_queuedPhrases());
-        $this->assertNotContains('The {attribute} is needed.', $this->_queuedPhrases());
+        // A catalog entry spelled like the key is never consulted: the key is Laravel's.
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['validation.required' => 'Wrong: Langsys answered']]);
+        $this->assertSame('The name is needed.', trans_choice('validation.required', 1, ['attribute' => 'name'], 'es-ES'));
     }
 
     public function testAPipePluralRendersThroughIcuOverCount(): void
@@ -166,20 +169,26 @@ class CatalogTranslatorTest extends TestCase
         $this->assertSame('1 apple', trans_choice('messages.apples', 1));
         $this->assertSame('3 apples', trans_choice('messages.apples', 3));
         $this->assertSame('2 apples', trans_choice('messages.apples', ['a', 'b']), 'A countable is counted, as Laravel does.');
-        $this->assertSame(['{count, plural, one {# apple} other {# apples}}'], $this->_queuedPhrases());
+
+        $this->seedCatalog('es-es', ['messages' => ['{count, plural, one {# apple} other {# apples}}' => '{count, plural, one {# manzana} other {# manzanas}}']]);
+        $this->assertSame('3 manzanas', trans_choice('messages.apples', 3, [], 'es-ES'), 'The ICU plural is the phrase looked up.');
     }
 
     /** Laravel's JSON lines are Laravel's syntax too, so their plurals convert like a group's. */
     public function testAJsonPluralRendersThroughIcuOverCount(): void
     {
         $this->assertSame('2 products', trans_choice('Basket', 2));
-        $this->assertSame(['{count, plural, one {# product} other {# products}}'], $this->_queuedPhrases());
+
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['{count, plural, one {# product} other {# products}}' => '{count, plural, one {# producto} other {# productos}}']]);
+        $this->assertSame('2 productos', trans_choice('Basket', 2, [], 'es-ES'));
     }
 
     public function testAPipePluralNoFileHoldsIsConvertedToo(): void
     {
         $this->assertSame('4 items', trans_choice(':count item|:count items', 4));
-        $this->assertSame(['{count, plural, one {# item} other {# items}}'], $this->_queuedPhrases());
+
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['{count, plural, one {# item} other {# items}}' => '{count, plural, one {# artículo} other {# artículos}}']]);
+        $this->assertSame('4 artículos', trans_choice(':count item|:count items', 4, [], 'es-ES'));
     }
 
     public function testATranslatedPluralSelectsForTheRequestLocale(): void
@@ -208,6 +217,8 @@ class CatalogTranslatorTest extends TestCase
         $this->assertFalse($this->app['translator']->has('messages.nope'));
         $this->assertTrue($this->app['translator']->has('validation.required'));
         $this->assertFalse($this->app['translator']->has('Hello :name'), 'A sentence is not a key, however it converts.');
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Save changes' => 'Guardar cambios']]);
+        $this->assertFalse($this->app['translator']->has('Save changes', 'es-ES'), 'Nor is a sentence the catalog translates.');
         $this->assertSame([], $this->_queued(), 'Asking is not rendering: nothing registers.');
     }
 

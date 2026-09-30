@@ -14,6 +14,11 @@ class FormController
         return 'ok';
     }
 
+    public function order(\Langsys\Laravel\Tests\Fixtures\Data\StoreOrderData $data)
+    {
+        return 'ok';
+    }
+
     public function team(RouteBoundRequest $request)
     {
         return 'ok';

@@ -50,11 +50,11 @@ class MessagesCommand extends Command
             $this->error('✗ ' . $problem);
         }
 
-        // A message that cannot be listed still registers the first time it is sent (MSG-8), so it
-        // is reported, not failed, unless the app asks for no untranslated message ever.
+        // A message that cannot be listed is still sent, in the source language, so it is reported,
+        // not failed, unless the app asks for no untranslated message ever.
         if ($catalog->hasProblems()) {
             $count = count($catalog->problems());
-            $this->warn($count . ($count === 1 ? ' message cannot' : ' messages cannot') . ' be registered ahead of time; each registers the first time it is sent');
+            $this->warn($count . ($count === 1 ? ' message cannot' : ' messages cannot') . ' be registered ahead of time; each is shown in the source language until it is');
 
             if ($this->option('strict')) {
                 return self::FAILURE;

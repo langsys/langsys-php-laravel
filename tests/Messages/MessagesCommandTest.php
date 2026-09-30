@@ -17,6 +17,11 @@ use Langsys\SDK\Messages\MessageCatalogCommand;
  */
 class MessagesCommandTest extends TestCase
 {
+    protected function getPackageProviders($app): array
+    {
+        return [...parent::getPackageProviders($app), \Spatie\LaravelData\LaravelDataServiceProvider::class];
+    }
+
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
@@ -27,6 +32,7 @@ class MessagesCommandTest extends TestCase
         $router->middleware('api')->post('/pay', [FormController::class, 'pay']);
         $router->post('/odd', [FormController::class, 'odd']);
         $router->post('/teams/{team}', [FormController::class, 'team']);
+        $router->post('/orders', [FormController::class, 'order']);
         $router->get('/closure', fn () => 'no request class');
     }
 
@@ -63,6 +69,29 @@ class MessagesCommandTest extends TestCase
         ] as $template) {
             $this->assertContains($template, $templates);
         }
+    }
+
+    /**
+     * A laravel-data request DTO is listed as a FormRequest is: each rule of each field, the
+     * DTO's own labels written in, a nested data object's fields under their own labels.
+     */
+    public function testALaravelDataRequestIsListedLikeAFormRequest(): void
+    {
+        $templates = $this->_templates();
+
+        foreach ([
+            'The customer name field is required.',
+            'The customer name field must not be greater than {max} characters.',
+            'The ZIP code field is required.',
+        ] as $template) {
+            $this->assertContains($template, $templates);
+        }
+    }
+
+    /** A rule object that declares its message (Laravel's `Rule` contract) is listed once per field, the label written in. */
+    public function testARuleObjectWithAMessageIsListedForEachField(): void
+    {
+        $this->assertContains('The coupon code must be uppercase.', $this->_templates());
     }
 
     /** An application's own message is its template, with the label written in and values as markers. */

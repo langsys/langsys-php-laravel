@@ -3,21 +3,31 @@
 namespace Langsys\Laravel;
 
 use Illuminate\Contracts\Foundation\Application;
+use Langsys\Laravel\Console\CacheCommand;
+use Langsys\Laravel\Console\ClearCommand;
 use Langsys\Laravel\Console\MessagesCommand;
+use Langsys\Laravel\Console\SyncCommand;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Events\LocaleUpdated;
+use Illuminate\Notifications\Events\NotificationFailed;
+use Illuminate\Notifications\Events\NotificationSending;
+use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Translation\Translator;
 use Langsys\Laravel\Cache\LaravelCacheAdapter;
 use Langsys\Laravel\Http\Middleware\AttachServerMessages;
+use Langsys\Laravel\Http\Middleware\MarkResolvedPage;
+use Langsys\Laravel\Http\ResponseKind;
 use Langsys\Laravel\Http\Middleware\DetectLocale;
 use Langsys\Laravel\Http\Middleware\FlushPendingRegistrations;
 use Langsys\Laravel\Http\Middleware\TranslateResponse;
 use Langsys\Laravel\Messages\MessageValidator;
 use Langsys\Laravel\Support\RequestLocaleWiring;
+use Langsys\Laravel\Support\ValueSetDiscovery;
 use Langsys\Laravel\Translation\CatalogTranslator;
 use Langsys\Laravel\Translation\MigrationFiles;
 use Langsys\SDK\Client;
@@ -33,8 +43,11 @@ class LangsysServiceProvider extends ServiceProvider
         $this->app->singleton(Client::class, function (Application $app) {
             $config = $app['config']['langsys'];
 
-            return new Client($config['api_key'], $config['project_id'], [
+            $client = new Client($config['api_key'], $config['project_id'], [
                 'api_url'           => $config['api_url'],
+                // FRM-2: what passes through `__()` registers only through `langsys:sync`.
+                'runtime_registration' => !$config['enabled'],
+                'value_sets'        => $config['enabled'] ? ValueSetDiscovery::classes() : [],
                 'messages_category' => $config['messages']['category'],
                 'request_locale'    => RequestLocaleWiring::options(),
                 'snapshot'          => self::_snapshot($config['snapshot'] ?? null),
@@ -48,6 +61,15 @@ class LangsysServiceProvider extends ServiceProvider
                     $config['project_id'],
                 ),
             ]);
+
+            // FRM-3: a catalog miss is answered by the app's own lang files before the source.
+            if ($config['enabled']) {
+                $client->useMissFallback(fn (string $phrase, string $locale, ?string $category, $argument) => $app['translator'] instanceof CatalogTranslator
+                    ? $app['translator']->fallbackLine($phrase, $locale, $argument)
+                    : null);
+            }
+
+            return $client;
         });
 
         $this->app->singleton(LangsysTranslator::class);
@@ -62,9 +84,15 @@ class LangsysServiceProvider extends ServiceProvider
         ], 'langsys-config');
 
         if ($this->app->runningInConsole()) {
-            $this->commands([MessagesCommand::class]);
+            $this->commands([SyncCommand::class, MessagesCommand::class, CacheCommand::class, ClearCommand::class]);
+
+            // Laravel 11.27+: `optimize` and `optimize:clear` run them, as they do event:cache.
+            if (method_exists($this, 'optimizes')) {
+                $this->optimizes(optimize: 'langsys:cache', clear: 'langsys:clear', key: 'langsys');
+            }
         }
 
+        $this->_registerTranslateDirectives();
         $this->_registerMiddlewareAliases();
         $this->_registerLongLivedBoundaries();
         $this->_registerServerMessages();
@@ -89,10 +117,39 @@ class LangsysServiceProvider extends ServiceProvider
         }
     }
 
+    /**
+     * `@lang` and its alias `@t` print raw, as Laravel's `@lang` does, but text from the catalog
+     * is rendered safe (FRM-8): see `CatalogTranslator::getHtml()`. The block form,
+     * `@lang ... @endlang`, stays Laravel's own. Switched off, both compile as Laravel's `@lang`.
+     */
+    private function _registerTranslateDirectives(): void
+    {
+        $line = fn (string $expression) => config('langsys.enabled')
+            ? "<?php echo app('translator')->getHtml($expression); ?>"
+            : "<?php echo app('translator')->get($expression); ?>";
+
+        $lang = function (?string $expression) use ($line) {
+            $expression = trim((string) $expression);
+
+            return match (true) {
+                $expression === ''              => '<?php $__env->startTranslation(); ?>',
+                str_starts_with($expression, '[') => "<?php \$__env->startTranslation($expression); ?>",
+                default                         => $line($expression),
+            };
+        };
+
+        Blade::directive('lang', $lang);
+        Blade::directive('t', $lang);
+    }
+
     private function _registerMiddlewareAliases(): void
     {
         $router = $this->app['router'];
         $router->aliasMiddleware('langsys.locale', DetectLocale::class);
+
+        // A notification is read by its recipient, not by the page being served (FRM-4).
+        $this->app['events']->listen(NotificationSending::class, fn () => ResponseKind::sending());
+        $this->app['events']->listen([NotificationSent::class, NotificationFailed::class], fn () => ResponseKind::sent());
 
         // The app resolved the locale if anything set it before DetectLocale runs (SRV-6).
         $this->app['events']->listen(
@@ -169,6 +226,11 @@ class LangsysServiceProvider extends ServiceProvider
             // application is free to ship without an `api` group.
             foreach (array_intersect(['web', 'api'], array_keys($kernel->getMiddlewareGroups())) as $group) {
                 $kernel->appendMiddlewareToGroup($group, AttachServerMessages::class);
+            }
+
+            // A page the server renders is marked resolved (FRM-4, GATE-10); an API has no page.
+            if (in_array('web', array_keys($kernel->getMiddlewareGroups()), true)) {
+                $kernel->appendMiddlewareToGroup('web', MarkResolvedPage::class);
             }
         });
     }
