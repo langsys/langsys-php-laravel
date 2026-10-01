@@ -3,6 +3,7 @@
 namespace Langsys\Laravel\Http\Middleware;
 
 use Closure;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
 use Langsys\SDK\Client;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,7 +23,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class FlushPendingRegistrations
 {
-    public function __construct(private readonly Client $client)
+    /** The container, not the Client: a request that built none has nothing queued, and building one without credentials throws. */
+    public function __construct(private readonly Container $app)
     {
     }
 
@@ -34,6 +36,8 @@ class FlushPendingRegistrations
     /** Runs once the response has been sent, so registration never spends the visitor's latency (SRV-3). */
     public function terminate(Request $request, Response $response): void
     {
-        $this->client->flushPendingRegistrations();
+        if ($this->app->resolved(Client::class)) {
+            $this->app->make(Client::class)->flushPendingRegistrations();
+        }
     }
 }

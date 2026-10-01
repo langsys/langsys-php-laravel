@@ -3,7 +3,9 @@
 namespace Langsys\Laravel\Http\Middleware;
 
 use Closure;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
+use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\LocaleFormatter;
 use Langsys\Laravel\Support\RequestLocaleWiring;
 use Langsys\SDK\Client;
@@ -38,26 +40,33 @@ class DetectLocale
     /** What each source varies on. The query string is part of the URL, the cache key already. */
     private const VARY = ['query' => null, 'cookie' => 'Cookie', 'session' => 'Cookie', 'header' => 'Accept-Language'];
 
-    public function __construct(private readonly Client $client)
+    /** The container, not the Client: building one without credentials throws, and a request with none is Laravel's. */
+    public function __construct(private readonly Container $app)
     {
     }
 
     public function handle(Request $request, Closure $next): Response
     {
+        if (!ClientState::buildable($this->app)) {
+            return $next($request);
+        }
+
+        $client = $this->app->make(Client::class);
+
         if ($request->attributes->get(self::RESOLVED) === true) {
             // The SDK validates Laravel's locale and maps it to the project's form; a locale the app
             // resolved is the app's to vary on, so nothing is sent (SRV-6).
-            $choice = $this->client->resolveRequestLocale(['framework' => app()->getLocale()], ['send_vary' => false]);
+            $choice = $client->resolveRequestLocale(['framework' => app()->getLocale()], ['send_vary' => false]);
 
             if ($choice['locale'] !== null) {
-                $this->client->setLocale($choice['locale']);
+                $client->setLocale($choice['locale']);
             }
 
             return $next($request);
         }
 
         try {
-            $project = $this->client->getProject();
+            $project = $client->getProject();
         } catch (Throwable) {
             // Nothing can be validated without the project's locales; Laravel's stands, untouched.
             return $next($request);
@@ -70,7 +79,7 @@ class DetectLocale
         [$locale, $source, $vary] = $this->_resolve($request, $served, $base, $defaults);
 
         app()->setLocale(LocaleFormatter::canonicalize($locale));
-        $this->client->setLocale($locale);
+        $client->setLocale($locale);
 
         $persist = $source === 'query' ? config('langsys.locale.persist') : null;
 

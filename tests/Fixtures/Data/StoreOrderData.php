@@ -2,15 +2,17 @@
 
 namespace Langsys\Laravel\Tests\Fixtures\Data;
 
+use Langsys\Laravel\Tests\Fixtures\app\Enums\OrderStatus;
 use Spatie\LaravelData\Data;
 
-/** A laravel-data request DTO: rules, labels and a nested object, as an application writes one. */
+/** A laravel-data request DTO: rules, labels, a nested object and an enum laravel-data infers a rule for, as an application writes one. */
 class StoreOrderData extends Data
 {
     public function __construct(
         public string $customer_name,
         public string $coupon,
         public ?AddressData $address,
+        public OrderStatus $status,
     ) {
     }
 
@@ -24,6 +26,6 @@ class StoreOrderData extends Data
 
     public static function attributes(): array
     {
-        return ['customer_name' => 'customer name', 'coupon' => 'coupon code'];
+        return ['customer_name' => 'customer name', 'coupon' => 'coupon code', 'status' => 'order status'];
     }
 }

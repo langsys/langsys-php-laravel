@@ -73,6 +73,7 @@ class BindingBoundaryTest extends TestCase
         'Langsys\\Laravel\\Messages\\MessageValidator'                   => ['passes', 'serverMessages'],
         'Langsys\\Laravel\\Messages\\FormRequestSource'                  => ['__construct', 'collect', 'fromRoutes'],
         'Langsys\\Laravel\\Messages\\ValidatorMessages'                  => ['forRule', 'fromValidator'],
+        'Langsys\\Laravel\\Support\\ClientState'                        => ['buildable'],
         'Langsys\\Laravel\\Support\\InertiaSsrProps'                    => ['share'],
         'Langsys\\Laravel\\Support\\LaravelLocales'                     => ['candidates', 'inLangPath'],
         'Langsys\\Laravel\\Support\\LocaleFormatter'                    => ['canonicalize'],

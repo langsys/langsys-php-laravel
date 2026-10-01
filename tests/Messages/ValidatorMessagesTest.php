@@ -138,6 +138,22 @@ class ValidatorMessagesTest extends TestCase
         $this->assertSame('The code must be uppercase.', $entries[1]->getTemplate());
     }
 
+    /**
+     * FRM-2: a rule object that states its template is sent from it — the label written in, the
+     * value a marker filled from its public property — not from the text Laravel filled.
+     */
+    public function testARuleObjectWithATemplateIsSentFromIt(): void
+    {
+        $validator = Validator::make(['reference' => 'one two three four'], ['reference' => [new \Langsys\Laravel\Tests\Fixtures\Http\MaxWords(3)]], [], ['reference' => 'payment reference']);
+        $validator->fails();
+
+        [$entry] = ValidatorMessages::fromValidator($validator, 'en');
+
+        $this->assertSame('The payment reference may not be more than {max} words.', $entry->getTemplate());
+        $this->assertSame(['max' => 3], $entry->getParams());
+        $this->assertSame('The payment reference may not be more than 3 words.', $validator->errors()->first('reference'), "Laravel's own message is untouched.");
+    }
+
     /** A rule object that fails twice sends both messages, one entry each, after the built-in rule's. */
     public function testEachFailureOfARuleObjectIsItsOwnEntry(): void
     {

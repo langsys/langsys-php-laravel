@@ -26,7 +26,10 @@ class CatalogTranslator extends Translator
     /** The call being resolved, for the miss fallback: [argument, replacements, entry point, count]. */
     private ?array $call = null;
 
-    /** @param  Closure(): LangsysTranslator  $langsys  Lazy: resolving the translator must not build a Client. */
+    /**
+     * @param  Closure(): ?LangsysTranslator  $langsys  Lazy: resolving the translator must not build a Client. Null
+     *                                                  when none can be built, and Laravel answers.
+     */
     public function __construct(Loader $loader, string $locale, private readonly Closure $langsys)
     {
         parent::__construct($loader, $locale);
@@ -34,16 +37,16 @@ class CatalogTranslator extends Translator
 
     public function get($key, array $replace = [], $locale = null, $fallback = true)
     {
-        if (!is_string($key) || $key === '' || self::_isValidationKey($key)) {
+        if (!is_string($key) || $key === '' || self::_isValidationKey($key) || ($langsys = ($this->langsys)()) === null) {
             return parent::get($key, $replace, $locale, $fallback);
         }
 
-        return $this->_resolve($key, $replace, $locale, '__', null)['text'];
+        return $this->_resolve($langsys, $key, $replace, $locale, '__', null)['text'];
     }
 
     public function choice($key, $number, array $replace = [], $locale = null)
     {
-        if (self::_isValidationKey($key)) {
+        if (self::_isValidationKey($key) || ($langsys = ($this->langsys)()) === null) {
             return parent::choice($key, $number, $replace, $locale);
         }
 
@@ -51,16 +54,16 @@ class CatalogTranslator extends Translator
             $number = count($number);
         }
 
-        return $this->_resolve($key, $replace, $locale, 'trans_choice', $number)['text'];
+        return $this->_resolve($langsys, $key, $replace, $locale, 'trans_choice', $number)['text'];
     }
 
     public function has($key, $locale = null, $fallback = true)
     {
-        if (self::_isValidationKey($key)) {
+        if (self::_isValidationKey($key) || ($langsys = ($this->langsys)()) === null) {
             return parent::has($key, $locale, $fallback);
         }
 
-        return ($this->langsys)()->client()->resolveLegacyKey($key) !== null;
+        return $langsys->client()->resolveLegacyKey($key) !== null;
     }
 
     /**
@@ -71,11 +74,11 @@ class CatalogTranslator extends Translator
      */
     public function getHtml($key, array $replace = [], $locale = null): string
     {
-        if (!is_string($key) || $key === '' || self::_isValidationKey($key)) {
+        if (!is_string($key) || $key === '' || self::_isValidationKey($key) || ($langsys = ($this->langsys)()) === null) {
             return (string) parent::get($key, $replace, $locale);
         }
 
-        return $this->_resolve($key, $replace, $locale, '__', null, rich: true)['text'];
+        return $this->_resolve($langsys, $key, $replace, $locale, '__', null, rich: true)['text'];
     }
 
     /**
@@ -112,9 +115,8 @@ class CatalogTranslator extends Translator
      *
      * @return array{text: string, from: string}
      */
-    private function _resolve(string $key, array $replace, ?string $locale, string $entryPoint, int|float|null $count, bool $rich = false): array
+    private function _resolve(LangsysTranslator $langsys, string $key, array $replace, ?string $locale, string $entryPoint, int|float|null $count, bool $rich = false): array
     {
-        $langsys = ($this->langsys)();
         $client = $langsys->client();
 
         // FRM-4: a page its own browser SDK translates gets the source, in the language the source

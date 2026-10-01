@@ -46,7 +46,7 @@ LANGSYS_API_KEY=your-api-key
 LANGSYS_PROJECT_ID=your-project-id
 ```
 
-Installing is enough: `__()` is answered by Langsys from then on. With nothing in the catalog, it returns exactly what Laravel returns on its own. `LANGSYS_ENABLED=false` turns the whole package off, for debugging with plain Laravel.
+Installing is enough: `__()` is answered by Langsys from then on. With nothing in the catalog, it returns exactly what Laravel returns on its own — and so it does with no key at all, so your tests, CI and a fresh checkout run without one. `LANGSYS_ENABLED=false` turns the whole package off, for debugging with plain Laravel.
 
 ### API key permissions
 
@@ -117,7 +117,7 @@ php artisan langsys:sync --strict   # also fail on anything it could not registe
 php artisan langsys:sync --watch    # sync again on every change (development)
 ```
 
-It reads every literal `__()`, `trans()`, `trans_choice()`, `@lang` and `t()` in `app/`, `routes/` and `resources/views/` (`langsys.sync_paths` replaces them), and every line of your base-language files. A phrase already in the catalog is left alone; one your lang files translate is registered with those translations, so work already done is kept; anything else is registered alone. A call whose argument is not a literal is reported with its file and line. Every validation message your routes can send is registered beside them.
+It reads every literal `__()`, `trans()`, `trans_choice()`, `@lang` and `t()` in `app/`, `routes/` and `resources/views/` (`langsys.sync_paths` replaces them), and every line of your base-language files. A phrase already in the catalog is left alone; one your lang files translate is registered with those translations, so work already done is kept; anything else is registered alone. A call whose argument is not a literal is reported with its file and line, unless it only builds a key inside a literal group — `__("messages.$key")` — whose lines are all registered anyway. Every validation message your routes can send is registered beside them, each with its field's label written in — which is why a line holding `:attribute` never registers on its own. A rule object of your own states its sentence through `Langsys\SDK\Messages\HasMessageTemplate` (see [`docs/server-messages.md`](docs/server-messages.md)).
 
 ### Locale detection
 

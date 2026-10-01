@@ -9,7 +9,7 @@ Graded row by row in `CONFORMANCE.md`. The design decisions and deferred work be
 
 ### Release gate — the core is untagged, and the constraint has to move at publication
 
-This branch depends on the 838 `langsys/langsys-php` core (`b26615a`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the server-message API, the snapshot seam, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
+This branch depends on the 838 `langsys/langsys-php` core (`9ff7b35`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the rule-object message template, the server-message API, the snapshot seam, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
 
 - **CI fails on this branch by design.** It installs from Packagist. Against v1.3.1, the boundary tests hit an undefined method, and the delegation probes find no fallback where the wrapper used to have one.
 - **At publication**, the constraint moves to the core's 838 tag and the local path repository (below) goes. The operator publishes every SDK at once, after all of them are green.
@@ -83,9 +83,9 @@ Installed, the package answers `__()`, `trans()`, `trans_choice()` and `@lang` (
 
 `__()` registers nothing while serving a request (FRM-2); `langsys:sync` registers what the app's code and lang files hold, with the lang files' translations. The page walk (`TranslateResponse`) still collects what it meets after the response. Blade is compiled for scanning by a plain `BladeCompiler`, where `@lang` and `@t` compile to Laravel's own `app('translator')->get()`, the call the core's scanner reads; the rendering compiler writes the escaping call. A compiled hit takes the line of its own call in the view — the n-th call of a function in the compiled view is its n-th in the source — because Blade drops comments and rewrites directives.
 
-### Open: a rule object's markers
+### Decided: a rule object states its template through the core's interface
 
-A rule object's `$fail()` text arrives filled, so its runtime entry is that text, while a rule object that declares `message()` is listed with its `{name}` template. The two meet only for a message with no markers. Laravel has no standard way for a rule object to hand over its params; closing it is a spec question.
+Laravel's rule contract hands the validator a finished message, so a listing cannot tell where a value goes. A rule object implementing `Langsys\SDK\Messages\HasMessageTemplate` is listed from `template()` through the core's `MessageCatalog::addRule()`, and at runtime the binding finds the failed rule's instance in `$validator->getRules()` — `failed()` keeps only its class — and sends `RuleTemplate::forField()`'s template and params, so runtime and listing read the same method. The label is Laravel's `getDisplayableAttribute()` at both sites. A rule object without the interface is listed from its filled message and fails `--strict`; one that declares no message ahead of time (`Password`) is reported with the same fix.
 
 ### Known limit: a Mailable sent during an Inertia request
 

@@ -2,14 +2,17 @@
 
 namespace Langsys\Laravel\Messages;
 
+use Illuminate\Contracts\Validation\ValidatorAwareRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationRuleParser;
+use Langsys\SDK\Messages\HasMessageTemplate;
 use Langsys\SDK\Messages\MessageCatalog;
 use Langsys\SDK\Messages\MessageSource;
+use Langsys\SDK\Messages\RuleTemplate;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Throwable;
@@ -77,8 +80,13 @@ final class FormRequestSource implements MessageSource
                 continue;
             }
 
+            // One field that cannot be listed is reported; the rest of the app is still listed.
             foreach ($rules as $field => $fieldRules) {
-                $this->_collectField($catalog, $source, (string) $field, $fieldRules, $rules, $messages, $attributes);
+                try {
+                    $this->_collectField($catalog, $source, (string) $field, $fieldRules, $rules, $messages, $attributes);
+                } catch (Throwable $e) {
+                    $catalog->problem($source, "cannot be listed: {$e->getMessage()}", 'give this field a message the listing can read without a request, or report it if the rule is a package\'s', (string) $field);
+                }
             }
         }
     }
@@ -96,10 +104,10 @@ final class FormRequestSource implements MessageSource
         $attribute = str_replace('*', '0', $field);
         $data = Arr::undot([$attribute => null]);
 
-        // MSG-10: advice, not a failure. Laravel's derived name is sometimes a raw key.
+        // MSG-10: advice, never a failure, `--strict` included. Laravel's derived name is sometimes a raw key.
         if (!array_key_exists($field, $attributes)) {
             $shown = Validator::make($data, $rules, $messages, $attributes)->getDisplayableAttribute($attribute);
-            $catalog->problem($source, "has no declared label, so Laravel prints \"$shown\"", 'declare one in attributes() if that is not what users should read', $field);
+            $catalog->advise($source, "has no declared label, so Laravel prints \"$shown\"", 'declare one in attributes() if that is not what users should read', $field);
         }
 
         foreach ((new ValidationRuleParser($data))->explode([$attribute => $fieldRules])->rules[$attribute] ?? [] as $rule) {
@@ -141,18 +149,42 @@ final class FormRequestSource implements MessageSource
     private function _collectRuleObject(MessageCatalog $catalog, string $source, string $field, string $attribute, object $rule, \Illuminate\Validation\Validator $validator): void
     {
         $rule = $rule instanceof \Illuminate\Validation\InvokableValidationRule ? $rule->invokable() : $rule;
+        $label = $validator->getDisplayableAttribute($attribute);
 
-        $messages = method_exists($rule, 'message') ? array_filter((array) $rule->message(), 'is_string') : [];
+        // As Laravel hands it over before the rule runs: `Rules\Enum` reads its line through it.
+        if ($rule instanceof ValidatorAwareRule) {
+            $rule->setValidator($validator);
+        }
 
-        // `Password` implements the contract too, but only knows its message once it has failed.
-        if ($messages === []) {
-            $catalog->problem($source, 'uses the rule object ' . get_class($rule) . ', which declares no message', "give it a message() returning its sentence, with :attribute for the field's label", $field);
+        // FRM-2: a rule that states its template is listed from it, markers intact.
+        if ($rule instanceof HasMessageTemplate) {
+            $catalog->addRule($rule, $label, '', $source, $field);
 
             return;
         }
 
+        $messages = method_exists($rule, 'message') ? array_filter((array) $rule->message(), 'is_string') : [];
+
+        // `Password` implements Laravel's contract too, but only knows its message once it has failed.
+        if ($messages === []) {
+            $catalog->problem($source, 'uses the rule object ' . get_class($rule) . ', which declares no message ahead of time', RuleTemplate::missingTemplateProblem('')[1], $field);
+
+            return;
+        }
+
+        // Laravel's own rule objects state Laravel's own line, and no app can give them a template.
+        if (str_starts_with(get_class($rule), 'Illuminate\\')) {
+            foreach ($messages as $message) {
+                $catalog->add($validator->makeReplacements((string) $message, $attribute, get_class($rule), []), $source, $field);
+            }
+
+            return;
+        }
+
+        // A filled message is all Laravel's contract gives: it is listed, and the core reports the
+        // missing template, since a value filled into it would become part of the phrase.
         foreach ($messages as $message) {
-            $catalog->add($validator->makeReplacements((string) $message, $attribute, get_class($rule), []), $source, $field);
+            $catalog->addRule($rule, $label, $validator->makeReplacements((string) $message, $attribute, get_class($rule), []), $source, $field);
         }
     }
 

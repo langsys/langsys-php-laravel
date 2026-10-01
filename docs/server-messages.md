@@ -58,7 +58,7 @@ Laravel's own text — the message bag, `$errors`, the 422 body's `message` and 
 4. **Code** (MSG-2). Laravel's own name for the rule that failed, passed through: `required`, `min`, `required_if`, the rule as written and as `validation.php` keys it. It does not change with the field's type or the side of a bound. A rule object or closure fails under the class Laravel records it by, and that class is its code.
 5. **Entry.** `ServerMessage::make($code, $template, $params, $field)` from the core, with `$field` Laravel's dotted attribute. `$client->emitMessage($entry)` renders it. Registration is sync's (§6); the one exception is a sentence built from a declared value the last sync did not see, sent after the response (FRM-7, MSG-8).
 
-**Rule objects and closures** have no line of Laravel's, so their template is the text they produced, with the label written in by Laravel. **`ValidationException::withMessages()`** carries text and no rule: its text is the template, and the entry carries no code, because Laravel has none for it (MSG-2, MSG-9).
+**Rule objects** have no line of Laravel's. One that implements the core's `HasMessageTemplate` states its sentence: `template()` returns it with `:attribute` for the label and a `{name}` marker for each value, filled from the rule's public property of the same name, and the entry is that template with the label written in and those params (FRM-2). Any other rule object, and a closure, has only the text it produced, with the label written in by Laravel, one entry per `$fail()`. **`ValidationException::withMessages()`** carries text and no rule: its text is the template, and the entry carries no code, because Laravel has none for it (MSG-2, MSG-9).
 
 ### 3.2 `__()`, `trans()`, `@lang` — keys resolve to source text
 
@@ -106,14 +106,13 @@ System messages — `abort()`, authorization and HTTP exceptions — carry no en
 - **in the lang files, not the catalog** — registered with the translations the other locales' files already have, in one call, so work already done is kept (MIG-9);
 - **in neither** — registered alone.
 
-A call whose argument is not a literal is reported with its file and line. A declared value set (FRM-7) registers one sentence per value, the word written in. The validation messages the app can send register beside them (MSG-7), from every FormRequest and laravel-data request DTO a route action takes: each rule of each field with the field's label written in, and each rule object that declares its `message()`, once per field that uses it.
+A call whose argument is not a literal is reported with its file and line; one that only builds its key inside a literal group — `__("messages.$key")` — is covered by that group, whose every line registers, and fails nothing. A declared value set (FRM-7) registers one sentence per value, the word written in. The validation messages the app can send register beside them (MSG-7), from every FormRequest and laravel-data request DTO a route action takes: each rule of each field with the field's label written in, and each rule object's template, once per field that uses it. Laravel's own rule objects (`Rules\Enum`, which laravel-data infers for an enum property) are listed from Laravel's line, which no app can give a template. A field that cannot be listed is reported and the listing carries on. A rule object of the app's without `HasMessageTemplate` is listed from its filled message and fails `--strict`, naming the interface: a value filled into that message would become part of the phrase. A line holding `:attribute`, `:other` or `:values` never registers on its own — it is a phrase no request looks up — and the command reports it as registered through the validation listing.
 
-`--dry-run` lists without registering. `--strict` exits 1 on any call it could not register ahead of time, for CI. `--watch` syncs again whenever a scanned file or lang file changes, for development. `langsys.sync_paths` replaces the directories it reads (app/, routes/, resources/views/). `php artisan langsys:messages` lists the validation messages alone, and reports what cannot be listed.
+`--dry-run` lists without registering. `--strict` exits 1 on any call it could not register ahead of time, for CI. `--watch` syncs again whenever a scanned file or lang file changes, for development. `langsys.sync_paths` replaces the directories it reads (app/, routes/, resources/views/). `php artisan langsys:messages` lists the validation messages alone, and reports what cannot be listed. A field with no declared label is named as advice, with the name Laravel prints for it (MSG-10): advice is printed apart and never fails the build, `--strict` included.
 
 ## 7. Known limits
 
 - **Option labels.** Laravel keeps display names for option values in `validation.values` lang lines. Without per-locale files they are declared in code: `setValueNames()` in a FormRequest's `withValidator()` (Part 2, step 4).
-- **A rule object's `{name}` markers.** A rule object's failure text arrives filled, so its entry is that text; a rule object that declares `message()` is listed with its template, and the two meet only for a message with no markers.
 
 ---
 
@@ -156,6 +155,22 @@ Labels shared by many requests can live in a base request class or a trait. **Do
 public function messages(): array
 {
     return ['email.unique' => 'An account already uses this :attribute.'];
+}
+```
+
+A rule object of your own states its sentence the same way, through `Langsys\SDK\Messages\HasMessageTemplate`, with each value a `{name}` marker named after a public property:
+
+```php
+class MaxWords implements ValidationRule, HasMessageTemplate
+{
+    public function __construct(public int $max) {}
+
+    public function template(): string
+    {
+        return 'The :attribute may not be more than {max} words.';
+    }
+
+    // validate() as before
 }
 ```
 

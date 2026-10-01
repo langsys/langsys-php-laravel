@@ -26,6 +26,7 @@ use Langsys\Laravel\Http\Middleware\DetectLocale;
 use Langsys\Laravel\Http\Middleware\FlushPendingRegistrations;
 use Langsys\Laravel\Http\Middleware\TranslateResponse;
 use Langsys\Laravel\Messages\MessageValidator;
+use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\RequestLocaleWiring;
 use Langsys\Laravel\Support\ValueSetDiscovery;
 use Langsys\Laravel\Translation\CatalogTranslator;
@@ -185,7 +186,7 @@ class LangsysServiceProvider extends ServiceProvider
                 return $translator;
             }
 
-            $catalog = new CatalogTranslator($translator->getLoader(), $translator->getLocale(), fn () => $app->make(LangsysTranslator::class));
+            $catalog = new CatalogTranslator($translator->getLoader(), $translator->getLocale(), fn () => ClientState::buildable($app) ? $app->make(LangsysTranslator::class) : null);
             $catalog->setFallback($translator->getFallback());
 
             return $catalog;

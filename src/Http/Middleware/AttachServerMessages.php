@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Langsys\Laravel\Messages\MessageValidator;
+use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\RequestLocaleWiring;
 use Langsys\SDK\Client;
 use Langsys\SDK\Messages\ServerMessage;
@@ -81,6 +82,11 @@ class AttachServerMessages
      */
     private function _negotiated(Request $request, JsonResponse $response, array $messages): array
     {
+        // No client to be had: the source, as with nothing in the catalog (FRM-3).
+        if (!ClientState::buildable()) {
+            return self::_entries($messages, fn (ServerMessage $message) => $message->getMessage());
+        }
+
         $client = app(Client::class);
         $choice = $request->attributes->get(DetectLocale::RESOLVED) === true
             ? $client->resolveRequestLocale(['framework' => app()->getLocale()], ['send_vary' => false])

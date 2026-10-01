@@ -17,12 +17,13 @@ class StorePaymentRequest extends FormRequest
             'vat_id'      => 'required_if:type,business',
             'items.*.sku' => 'required|string',
             'pin'         => ['nullable', Password::min(8)->letters()],
+            'reference'   => ['nullable', new MaxWords(3)],
         ];
     }
 
     public function attributes(): array
     {
-        return ['cc_number' => 'card number', 'vat_id' => 'VAT number', 'items.*.sku' => 'item code'];
+        return ['cc_number' => 'card number', 'vat_id' => 'VAT number', 'items.*.sku' => 'item code', 'reference' => 'payment reference'];
     }
 
     public function messages(): array

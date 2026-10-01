@@ -3,6 +3,7 @@
 namespace Langsys\Laravel\Messages;
 
 use Illuminate\Validation\Validator;
+use Langsys\Laravel\Support\ClientState;
 use Langsys\SDK\Client;
 use Langsys\SDK\Locale\LocaleDetector;
 use Langsys\SDK\Messages\ServerMessage;
@@ -54,6 +55,13 @@ final class MessageValidator extends Validator
     {
         try {
             $entries = ValidatorMessages::fromValidator($this, config('app.fallback_locale'));
+            $this->serverMessages = $entries;
+
+            // With no client to be had the entries still travel, in the source language.
+            if (!ClientState::buildable()) {
+                return;
+            }
+
             $client = app(Client::class);
 
             // The app locale, not Client::getLocale(), which auto-detects from $_SERVER and can
@@ -63,8 +71,6 @@ final class MessageValidator extends Validator
             foreach ($entries as $entry) {
                 $client->emitMessage($entry);
             }
-
-            $this->serverMessages = $entries;
         } catch (Throwable $e) {
             // A form must never break because this did. Laravel's messages stand either way, since
             // nothing above rewrites them.

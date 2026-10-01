@@ -11,6 +11,9 @@ class OrderController
             __('Pay :amount now', ['amount' => $amount]),
             __($dynamic),
             trans_choice(':count item|:count items', $items),
+            __('The :attribute is not a code we issued.'),
+            __("messages.$dynamic"),
+            __("validation.$dynamic", [], 'en'),
         ];
     }
 }

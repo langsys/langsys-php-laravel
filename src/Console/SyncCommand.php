@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\View\Compilers\BladeCompiler;
 use Langsys\Laravel\Messages\FormRequestSource;
+use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\LaravelLocales;
 use Langsys\Laravel\Translation\MigrationFiles;
 use Langsys\SDK\Client;
@@ -69,11 +70,18 @@ class SyncCommand extends Command
 
     private function _sync(): int
     {
+        // Sync diffs against the project's catalog and registers into it: it needs the project.
+        if (!ClientState::buildable($this->laravel)) {
+            $this->error('langsys:sync needs LANGSYS_API_KEY and LANGSYS_PROJECT_ID: a write key to register, or any key for --dry-run.');
+
+            return self::FAILURE;
+        }
+
         $client = $this->laravel->make(Client::class);
         [$hits, $files] = $this->_hits();
 
         try {
-            $plan = $client->planSync($hits, $this->_targets($client));
+            $plan = $client->planSync($hits, $this->_targets($client), ['covered_groups' => $this->_validatorGroups()]);
         } catch (Throwable $e) {
             $this->error('Cannot plan the sync: ' . $e->getMessage());
 
@@ -82,6 +90,15 @@ class SyncCommand extends Command
 
         $messages = MessageCatalogCommand::collect([FormRequestSource::fromRoutes($this->laravel['router'])]);
         $this->_report($plan, $files, count($messages->templates()));
+
+        // Validation messages: problems fail `--strict`, advice (MSG-10) never does.
+        foreach ($messages->problems() as $problem) {
+            $this->error('✗ ' . $problem);
+        }
+
+        foreach ($messages->advice() as $advice) {
+            $this->line('  · ' . $advice);
+        }
 
         $strict = $this->option('strict') && ($plan->failsStrict() || $messages->hasProblems());
 
@@ -120,6 +137,18 @@ class SyncCommand extends Command
             foreach ($plan->toRegister() as $item) {
                 $this->line('  ' . $item['phrase'] . ($item['category'] === null ? '' : "  <fg=gray>{$item['category']}</>"));
             }
+        }
+
+        // FRM-2: a line holding a label placeholder is a phrase no request looks up; each field's
+        // sentence, the label written in, is what registers.
+        foreach ($plan->viaValidation as $line) {
+            $this->line("  {$line['origin']}: \"{$line['phrase']}\" holds {$line['placeholder']}, so it is registered through the validation listing, once per field");
+        }
+
+        // FRM-2: a key built at runtime inside a literal group names one of that group's lines,
+        // every one of which is registered.
+        foreach ($plan->covered as $call) {
+            $this->line("  {$call['file']}:{$call['line']}: {$call['entry_point']}() builds its key at runtime, inside the {$call['group']} group, whose every line is registered");
         }
 
         foreach ($plan->reported as $call) {
@@ -213,6 +242,21 @@ class SyncCommand extends Command
         }
 
         return $targets;
+    }
+
+    /**
+     * `validation` is the validator's group, never a migration file, so the plan is told it is
+     * accounted for: its sentences register per field through the validation listing, and a key
+     * built inside it (`__("validation.$key")`) names one of them (FRM-2).
+     *
+     * @return list<string>
+     */
+    private function _validatorGroups(): array
+    {
+        $locale = $this->laravel['config']['app.fallback_locale'];
+        $framework = dirname((new \ReflectionClass(\Illuminate\Translation\Translator::class))->getFileName()) . "/lang/$locale/validation.php";
+
+        return is_file($this->laravel->langPath("$locale/validation.php")) || is_file($framework) ? ['validation'] : [];
     }
 
     /** How each entry point is written in a Blade view, for finding a compiled hit's call again. */

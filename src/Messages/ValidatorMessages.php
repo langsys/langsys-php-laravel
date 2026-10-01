@@ -4,7 +4,10 @@ namespace Langsys\Laravel\Messages;
 
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
+use Illuminate\Validation\InvokableValidationRule;
 use Illuminate\Validation\Validator;
+use Langsys\SDK\Messages\HasMessageTemplate;
+use Langsys\SDK\Messages\RuleTemplate;
 use Langsys\SDK\Messages\ServerMessage;
 use ReflectionMethod;
 
@@ -72,10 +75,35 @@ final class ValidatorMessages
             return [$entry];
         }
 
-        // A rule Laravel ships no line for: an application's own rule object, or a closure. The
-        // text it produced is the only source there is, one entry per `$fail()`, and the listing
-        // command reports it so it can be given a real template (MSG-7).
+        // FRM-2: a rule object that states its template is sent from it, as the listing lists it.
+        $object = self::_ruleObject($validator, $attribute, $rule);
+
+        if ($object instanceof HasMessageTemplate) {
+            $stated = RuleTemplate::forField($object, $validator->getDisplayableAttribute($attribute));
+
+            return [ServerMessage::make(self::_code($rule), $stated['template'], $stated['params'], $attribute)];
+        }
+
+        // Any other rule object, or a closure: the text it produced is the only source there is,
+        // one entry per `$fail()`, and the listing reports it so it can be given a template.
         return array_map(fn (string $text) => ServerMessage::make(self::_code($rule), $text, [], $attribute), $span);
+    }
+
+    /**
+     * The rule object Laravel recorded a failure under, by its class: `failed()` keeps only the
+     * class, and the instance holds the values its template's markers name.
+     */
+    private static function _ruleObject(Validator $validator, string $attribute, string $rule): ?object
+    {
+        foreach ($validator->getRules()[$attribute] ?? [] as $candidate) {
+            $candidate = $candidate instanceof InvokableValidationRule ? $candidate->invokable() : $candidate;
+
+            if (is_object($candidate) && get_class($candidate) === $rule) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**

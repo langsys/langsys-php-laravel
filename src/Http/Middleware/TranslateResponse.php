@@ -3,7 +3,9 @@
 namespace Langsys\Laravel\Http\Middleware;
 
 use Closure;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
+use Langsys\Laravel\Support\ClientState;
 use Langsys\SDK\Client;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -32,7 +34,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class TranslateResponse
 {
-    public function __construct(private readonly Client $client)
+    /** The container, not the Client: building one without credentials throws, and a request with none is Laravel's. */
+    public function __construct(private readonly Container $app)
     {
     }
 
@@ -40,7 +43,7 @@ class TranslateResponse
     {
         $response = $next($request);
 
-        if (!$this->_shouldTranslate($request, $response)) {
+        if (!$this->_shouldTranslate($request, $response) || !ClientState::buildable($this->app)) {
             return $response;
         }
 
@@ -57,12 +60,13 @@ class TranslateResponse
         // language a page is in, and so we never fall through to
         // Client::getLocale(), which auto-detects from $_SERVER and can
         // trigger an HTTP call for the project's base locale.
-        $this->client->setLocale(app()->getLocale());
+        $client = $this->app->make(Client::class);
+        $client->setLocale(app()->getLocale());
 
         // Served as returned. translatePage() never throws and hands back the
         // source HTML on every degraded path (WIRE-4), so a guard here would be
         // a second fallback that could only drift from the SDK's own.
-        $response->setContent($this->client->translatePage(
+        $response->setContent($client->translatePage(
             $html,
             config('langsys.translate_response.category')
         ));

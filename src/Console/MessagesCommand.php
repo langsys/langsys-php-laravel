@@ -4,7 +4,9 @@ namespace Langsys\Laravel\Console;
 
 use Illuminate\Console\Command;
 use Langsys\Laravel\Messages\FormRequestSource;
+use Langsys\Laravel\Support\ClientState;
 use Langsys\SDK\Client;
+use Langsys\SDK\Messages\MessageCatalog;
 use Langsys\SDK\Messages\MessageCatalogCommand;
 use Langsys\SDK\Migration\LegacyKeysSource;
 use Throwable;
@@ -27,7 +29,7 @@ class MessagesCommand extends Command
 
         // The lang files carry what the migration cannot convert as it stands (MIG-4,
         // MIG-7). Building a Client without credentials throws, so only a configured app asks.
-        if (config('langsys.enabled') && config('langsys.api_key')) {
+        if (config('langsys.enabled') && ClientState::buildable($this->laravel)) {
             $legacy = $this->laravel->make(Client::class)->getLegacyKeys();
 
             if ($legacy !== null) {
@@ -46,9 +48,7 @@ class MessagesCommand extends Command
             }
         }
 
-        foreach ($catalog->problems() as $problem) {
-            $this->error('✗ ' . $problem);
-        }
+        $this->_printFindings($catalog);
 
         // A message that cannot be listed is still sent, in the source language, so it is reported,
         // not failed, unless the app asks for no untranslated message ever.
@@ -82,4 +82,21 @@ class MessagesCommand extends Command
 
         return self::SUCCESS;
     }
+
+    /** Problems fail `--strict`; advice (MSG-10) is printed apart and never does. */
+    private function _printFindings(MessageCatalog $catalog): void
+    {
+        foreach ($catalog->problems() as $problem) {
+            $this->error('✗ ' . $problem);
+        }
+
+        if ($catalog->advice() !== []) {
+            $this->line('Advice:');
+
+            foreach ($catalog->advice() as $advice) {
+                $this->line('  · ' . $advice);
+            }
+        }
+    }
+
 }

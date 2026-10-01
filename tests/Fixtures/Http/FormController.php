@@ -19,6 +19,11 @@ class FormController
         return 'ok';
     }
 
+    public function device(UnlabelledRequest $request)
+    {
+        return 'ok';
+    }
+
     public function team(RouteBoundRequest $request)
     {
         return 'ok';

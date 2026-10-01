@@ -50,6 +50,38 @@ class SyncContractTest extends ContractTestCase
         $this->assertSame(1, count(array_filter($registered, fn ($p) => $p[1] === 'Total')), 'Already in the catalog: not registered again.');
     }
 
+    /**
+     * FRM-2: a literal holding `:attribute` is a phrase no request looks up. It registers nothing on
+     * its own, is reported as registered through the validation listing, and fails nothing.
+     */
+    public function testALineHoldingALabelPlaceholderRegistersOnlyThroughTheValidationListing(): void
+    {
+        $this->artisan('langsys:sync')
+            ->expectsOutputToContain('OrderController.php:14: "The :attribute is not a code we issued." holds :attribute, so it is registered through the validation listing')
+            ->assertExitCode(0);
+
+        $registered = array_column($this->registeredPhrases(), 1);
+        $this->assertContains('Place order', $registered, 'Control: the sync registered.');
+        $this->assertSame([], array_values(array_filter($registered, fn (string $phrase) => str_contains($phrase, 'not a code we issued'))));
+    }
+
+    /**
+     * FRM-2: a key built at runtime inside a literal group names one of that group's lines, all of
+     * which register, so it is listed as covered and fails nothing — `validation` too, the
+     * validator's group, whose sentences register per field; a key with no literal group is still
+     * reported.
+     */
+    public function testARuntimeKeyInsideALiteralGroupIsCoveredByTheGroup(): void
+    {
+        $this->artisan('langsys:sync', ['--dry-run' => true])
+            ->expectsOutputToContain('OrderController.php:15: __() builds its key at runtime, inside the messages group, whose every line is registered')
+            ->expectsOutputToContain('OrderController.php:16: __() builds its key at runtime, inside the validation group, whose every line is registered')
+            ->doesntExpectOutputToContain('OrderController.php:15: __() is called with something that is not a literal')
+            ->doesntExpectOutputToContain('OrderController.php:16: __() is called with something that is not a literal')
+            ->expectsOutputToContain('OrderController.php:12: __() is called with something that is not a literal')
+            ->assertExitCode(0);
+    }
+
     public function testANonLiteralCallIsReportedWithItsFileAndLineAndFailsStrict(): void
     {
         $this->artisan('langsys:sync', ['--dry-run' => true])
