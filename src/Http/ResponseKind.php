@@ -2,6 +2,8 @@
 
 namespace Langsys\Laravel\Http;
 
+use Illuminate\Contracts\Mail\Mailable;
+use Illuminate\Contracts\Mail\Mailer;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 
@@ -22,13 +24,42 @@ final class ResponseKind
     /** Notifications being sent right now; Laravel's own events open and close each one. */
     private static int $sending = 0;
 
+    /**
+     * Frames read looking for a Mailable. Measured: from `__()` in a Mailable's Blade view — a
+     * layout with an `@include` — up to `Mailable::send()` is 26 frames; each nested view adds about
+     * four. 64 leaves room for some nine more levels of nesting.
+     */
+    private const MAILABLE_DEPTH = 64;
+
     public static function current(): string
     {
         if (self::$sending > 0 || !app()->bound('request')) {
             return self::SERVER;
         }
 
-        return self::of(app('request'));
+        $kind = self::of(app('request'));
+
+        // FRM-4: a Mailable sent or previewed while serving a client page is read by its recipient.
+        return $kind === self::CLIENT && self::_insideMailable() ? self::SERVER : $kind;
+    }
+
+    /**
+     * Laravel has no event before mail renders, so the call stack says whether `__()` was reached
+     * from it: a Mailable's `send()` (envelope, subject and Blade body), its `render()` preview, or
+     * the mailer sending a view with no Mailable (`Mail::send('emails.x', …)`). A
+     * frame carries its class without `DEBUG_BACKTRACE_PROVIDE_OBJECT`, and the depth is bounded:
+     * asked only on a client page, where server-side `__()` is rare.
+     */
+    private static function _insideMailable(): bool
+    {
+        $frames = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, self::MAILABLE_DEPTH);
+        foreach ($frames as $frame) {
+            if (isset($frame['class']) && (is_a($frame['class'], Mailable::class, true) || is_a($frame['class'], Mailer::class, true))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static function of(Request $request): string

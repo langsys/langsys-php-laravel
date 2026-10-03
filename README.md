@@ -127,7 +127,7 @@ It reads every literal `__()`, `trans()`, `trans_choice()`, `@lang` and `t()` in
 
 ### What the response gets
 
-What `__()` returns depends on who reads the response next. A page the server renders gets the translation, and its root is marked resolved so a browser SDK does not translate it again. An Inertia page — Inertia's middleware on the route, or an Inertia visit — gets the source, because its own browser SDK translates it. A notification is translated in the recipient's `preferredLocale()`, from a queued job too. `langsys.response_kinds` decides it yourself for a route group: `auto`, `server` or `client`.
+What `__()` returns depends on who reads the response next. A page the server renders gets the translation, and its root is marked resolved so a browser SDK does not translate it again. Values Blade prints in text are marked as placeholders — `<p>Hello {{ $user->name }}</p>` is the one phrase `Hello {name}` for every user — so a browser SDK or the page walk never registers a sentence per user. An Inertia page — Inertia's middleware on the route, or an Inertia visit — gets the source, because its own browser SDK translates it. A notification is translated in the recipient's `preferredLocale()`, from a queued job too, and mail sent while serving an Inertia page is translated rather than handed the page's source text. `langsys.response_kinds` decides it yourself for a route group: `auto`, `server` or `client`.
 
 ### Livewire
 

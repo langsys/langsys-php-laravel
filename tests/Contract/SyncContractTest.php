@@ -17,8 +17,14 @@ class SyncContractTest extends ContractTestCase
     {
         parent::defineEnvironment($app);
         $app->useLangPath(self::APP . '/lang');
+        $app->useAppPath(self::APP . '/app');
         $app['config']->set('app.fallback_locale', 'en');
         $app['config']->set('langsys.sync_paths', [self::APP . '/app', self::APP . '/views']);
+    }
+
+    protected function defineRoutes($router): void
+    {
+        $router->post('/handles', [\Langsys\Laravel\Tests\Fixtures\sync\app\HandleController::class, 'store']);
     }
 
     protected function setUp(): void
@@ -83,6 +89,18 @@ class SyncContractTest extends ContractTestCase
             ->assertExitCode(0);
     }
 
+    /**
+     * MSG-7: a call inside an app message's template() is that message's listing even when it
+     * reads no literal and the contract is inherited — so it is not reported, and `--strict` holds.
+     */
+    public function testANonLiteralCallInAnInheritedAppMessageIsItsListing(): void
+    {
+        $this->artisan('langsys:sync', ['--dry-run' => true])
+            ->expectsOutputToContain("PlanExpired.php:12: __() states PlanExpired's message, registered through the message listing")
+            ->doesntExpectOutputToContain('PlanExpired.php:12: __() is called with something that is not a literal')
+            ->assertExitCode(0);
+    }
+
     public function testANonLiteralCallIsReportedWithItsFileAndLineAndFailsStrict(): void
     {
         $this->artisan('langsys:sync', ['--dry-run' => true])
@@ -91,6 +109,29 @@ class SyncContractTest extends ContractTestCase
             ->assertExitCode(0);
 
         $this->artisan('langsys:sync', ['--dry-run' => true, '--strict' => true])->assertExitCode(1);
+    }
+
+    /**
+     * MSG-7: a message the app defines itself registers once, under the messages category; the
+     * `__()` literal inside its template method is that listing's, never an uncategorised phrase.
+     */
+    public function testAnAppMessageRegistersUnderTheCategoryAndItsLiteralNowhereElse(): void
+    {
+        $this->artisan('langsys:sync')
+            ->expectsOutputToContain("QuotaExceeded.php:16: __() states QuotaExceeded's message, registered through the message listing")
+            ->assertExitCode(0);
+
+        $registered = $this->registeredPhrases();
+        $this->assertContains(['Errors', 'You have used all {limit} requests this month.'], $registered);
+
+        // FRM-2 (8.5.8): neither an inherited app message, nor an enum's case, nor a sentence a rule
+        // reads from elsewhere registers bare beside its listing.
+        foreach (['Your plan allows {limit} projects.', 'That record does not exist.', 'Use lowercase letters and dashes only.'] as $sentence) {
+            $this->assertContains(['Errors', $sentence], $registered, $sentence);
+            $this->assertNotContains([null, $sentence], $registered, $sentence);
+        }
+        $this->assertContains(['Errors', 'That record does not exist.'], $registered, 'An enum registers each case.');
+        $this->assertNotContains([null, 'You have used all {limit} requests this month.'], $registered);
     }
 
     /**

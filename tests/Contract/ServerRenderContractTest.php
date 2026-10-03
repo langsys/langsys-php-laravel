@@ -29,6 +29,9 @@ class ServerRenderContractTest extends ContractTestCase
         // Automatic mode: the page walk, which still collects what it meets (SRV-3, GATE-7).
         $router->middleware(['web', 'langsys.locale', 'langsys.translate-page', 'langsys.flush'])->get('/walk', fn () => self::PLAIN_PAGE);
 
+        // VAR-5 on the page walk: a Blade sentence with a user's name in it.
+        $router->middleware(['web', 'langsys.locale', 'langsys.translate-page', 'langsys.flush'])->get('/walk/greeting', fn () => Blade::render('<html><body><p>Hello {{ $name }}, welcome back</p></body></html>', ['name' => request('name')]));
+
         // Renders, then changes the world so the double would now accept this key's write.
         $router->middleware(['web', 'langsys.locale', 'langsys.translate-page', 'langsys.flush'])->get('/walk/drift', function () {
             $this->seedProject(['ipk' => ['type' => 'ip_write', 'ip_allowlist' => ['127.0.0.1']]], $this->_catalog());
@@ -67,6 +70,24 @@ class ServerRenderContractTest extends ContractTestCase
         $this->get('/walk?locale=es-ES')->assertOk()->assertSee('Precios', false);
 
         $this->assertContains([null, 'Talk to sales'], $this->registeredPhrases());
+    }
+
+    /**
+     * VAR-1 and VAR-5 on the server: Blade marks the name it prints, so two users' pages register
+     * one phrase, with the placeholder, and neither user's name reaches the catalog.
+     */
+    public function testTwoUsersPagesRegisterOnePhraseWithThePlaceholder(): void
+    {
+        $this->seedProject(['wk' => ['type' => 'write']], $this->_catalog());
+        $this->useKey('wk');
+
+        $this->get('/walk/greeting?locale=es-ES&name=Ana')->assertOk();
+        $this->useKey('wk');
+        $this->get('/walk/greeting?locale=es-ES&name=Bo')->assertOk();
+
+        $phrases = array_column($this->registeredPhrases(), 1);
+        $this->assertSame(1, count(array_keys($phrases, 'Hello {name}, welcome back')), 'One phrase for every user.');
+        $this->assertSame([], array_values(array_filter($phrases, fn (string $p) => str_contains($p, 'Ana') || str_contains($p, 'Bo,'))));
     }
 
     /**

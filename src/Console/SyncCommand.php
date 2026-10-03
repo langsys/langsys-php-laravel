@@ -5,7 +5,9 @@ namespace Langsys\Laravel\Console;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\View\Compilers\BladeCompiler;
+use Langsys\Laravel\Messages\AppMessageSource;
 use Langsys\Laravel\Messages\FormRequestSource;
+use Langsys\Laravel\Support\AppMessageDiscovery;
 use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\LaravelLocales;
 use Langsys\Laravel\Support\ValueSetDiscovery;
@@ -84,7 +86,15 @@ class SyncCommand extends Command
         }
 
         [$hits, $files] = $this->_hits();
-        $options = ['covered_groups' => $this->_validatorGroups()];
+        $messages = MessageCatalogCommand::collect([FormRequestSource::fromRoutes($this->laravel['router']), AppMessageSource::discovered()]);
+
+        // FRM-2, MSG-7: a call the messages listing already owns — inside an app message's
+        // template(), or whose sentence the listing lists — is that listing's, never a bare phrase.
+        $options = [
+            'covered_groups'   => $this->_validatorGroups(),
+            'message_classes'  => AppMessageDiscovery::classes(),
+            'listed_templates' => array_column($messages->templates(), 'template'),
+        ];
 
         try {
             if ($online) {
@@ -100,7 +110,6 @@ class SyncCommand extends Command
             return self::FAILURE;
         }
 
-        $messages = MessageCatalogCommand::collect([FormRequestSource::fromRoutes($this->laravel['router'])]);
         $this->_report($plan, $files, count($messages->templates()));
 
         // Validation messages: problems fail `--strict`, advice (MSG-10) never does.
@@ -161,6 +170,13 @@ class SyncCommand extends Command
         // every one of which is registered.
         foreach ($plan->covered as $call) {
             $this->line("  {$call['file']}:{$call['line']}: {$call['entry_point']}() builds its key at runtime, inside the {$call['group']} group, whose every line is registered");
+        }
+
+        // MSG-7: a call inside an app message's template method is that message's listing.
+        foreach ($plan->viaMessageListing as $call) {
+            $this->line($call['class'] !== null
+                ? "  {$call['file']}:{$call['line']}: {$call['entry_point']}() states {$call['class']}'s message, registered through the message listing"
+                : "  {$call['file']}:{$call['line']}: {$call['entry_point']}() prints \"{$call['phrase']}\", a message the listing registers under its category");
         }
 
         foreach ($plan->reported as $call) {

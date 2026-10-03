@@ -127,6 +127,14 @@ return [
          * their names: field, code, message, template, params.
          */
         'pieces' => [],
+
+        /*
+         * Messages your app defines itself — an API error, a notice — implement
+         * \Langsys\SDK\Messages\HasAppMessageTemplate: template() returns the
+         * sentence with a {name} marker per value, code() its identifier. Those
+         * in app/ are found without listing them; list classes kept elsewhere.
+         */
+        'classes' => [],
     ],
 
     /*

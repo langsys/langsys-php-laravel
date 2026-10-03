@@ -3,6 +3,7 @@
 namespace Langsys\Laravel\Console;
 
 use Illuminate\Console\Command;
+use Langsys\Laravel\Messages\AppMessageSource;
 use Langsys\Laravel\Messages\FormRequestSource;
 use Langsys\Laravel\Support\ClientState;
 use Langsys\SDK\Client;
@@ -25,7 +26,7 @@ class MessagesCommand extends Command
 
     public function handle(): int
     {
-        $sources = [FormRequestSource::fromRoutes($this->laravel['router'])];
+        $sources = [FormRequestSource::fromRoutes($this->laravel['router']), AppMessageSource::discovered()];
 
         // The lang files carry what the migration cannot convert as it stands (MIG-4,
         // MIG-7). Building a Client without credentials throws, so only a configured app asks.

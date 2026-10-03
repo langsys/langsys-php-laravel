@@ -71,8 +71,11 @@ class BindingBoundaryTest extends TestCase
         'Langsys\\Laravel\\LangsysTranslator'                           => ['__construct', 'client', 'resolve', 'translate', 'translateRich'],
         'Langsys\\Laravel\\Messages\\RuleWording'                       => ['placeholders'],
         'Langsys\\Laravel\\Messages\\MessageValidator'                   => ['passes', 'serverMessages'],
+        'Langsys\\Laravel\\Messages\\AppMessageSource'                   => ['__construct', 'collect', 'discovered'],
         'Langsys\\Laravel\\Messages\\FormRequestSource'                  => ['__construct', 'collect', 'fromRoutes'],
         'Langsys\\Laravel\\Messages\\ValidatorMessages'                  => ['forRule', 'fromValidator'],
+        'Langsys\\Laravel\\Support\\AppMessageDiscovery'                => ['cache', 'cachePath', 'classes', 'clear', 'isDeclaration', 'within'],
+        'Langsys\\Laravel\\Support\\ClassDiscovery'                     => ['within'],
         'Langsys\\Laravel\\Support\\ClientState'                        => ['buildable'],
         'Langsys\\Laravel\\Support\\InertiaSsrProps'                    => ['share'],
         'Langsys\\Laravel\\Support\\LaravelLocales'                     => ['candidates', 'inLangPath'],
@@ -81,6 +84,8 @@ class BindingBoundaryTest extends TestCase
         'Langsys\\Laravel\\Support\\ValueSetDiscovery'                  => ['cache', 'cachePath', 'classes', 'clear', 'isDeclaration', 'within'],
         'Langsys\\Laravel\\Translation\\CatalogTranslator'              => ['__construct', 'choice', 'fallbackLine', 'get', 'getHtml', 'has'],
         'Langsys\\Laravel\\Translation\\MigrationFiles'                 => ['for'],
+        'Langsys\\Laravel\\View\\PlaceholderNames'                     => ['names', 'shapeOf', 'snake'],
+        'Langsys\\Laravel\\View\\ValueMarker'                          => ['precompile', 'value'],
     ];
 
     /**
@@ -103,6 +108,7 @@ class BindingBoundaryTest extends TestCase
         'locale.sources'              => 'SRV-6 wiring: which of the app\'s sources are read, in its order',
         'locale.supported'            => 'SRV-6 wiring: the app\'s own narrowing of the project\'s locales',
         'messages.category'           => "the core's messages_category option",
+        'messages.classes'            => 'MSG-7 wiring: app messages kept outside app/, as value_sets is for FRM-7',
         'messages.pieces'             => 'the names of an entry\'s pieces in the application\'s own error body (MSG-1)',
         'messages.response_key'       => 'where the entries sit in the application\'s own error body (MSG-1)',
         'project_id'                  => 'core option',

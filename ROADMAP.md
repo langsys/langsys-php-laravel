@@ -9,7 +9,7 @@ Graded row by row in `CONFORMANCE.md`. The design decisions and deferred work be
 
 ### Release gate — the core is untagged, and the constraint has to move at publication
 
-This branch depends on the 838 `langsys/langsys-php` core (`e613bfb`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the rule-object message template, the server-message API, the snapshot seam, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
+This branch depends on the 838 `langsys/langsys-php` core (`7ad91bc`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the rule-object and app-message templates, the offline planner, the server-message API, the snapshot seam, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
 
 - **CI fails on this branch by design.** It installs from Packagist. Against v1.3.1, the boundary tests hit an undefined method, and the delegation probes find no fallback where the wrapper used to have one.
 - **At publication**, the constraint moves to the core's 838 tag and the local path repository (below) goes. The operator publishes every SDK at once, after all of them are green.
@@ -68,13 +68,17 @@ Installed, the package answers `__()`, `trans()`, `trans_choice()` and `@lang` (
 
 Laravel's rule contract hands the validator a finished message, so a listing cannot tell where a value goes. A rule object implementing `Langsys\SDK\Messages\HasMessageTemplate` is listed from `template()` through the core's `MessageCatalog::addRule()`, and at runtime the binding finds the failed rule's instance in `$validator->getRules()` — `failed()` keeps only its class — and sends `RuleTemplate::forField()`'s template and params, so runtime and listing read the same method. The label is Laravel's `getDisplayableAttribute()` at both sites. A rule object without the interface is listed from its filled message and fails `--strict`; one that declares no message ahead of time (`Password`) is reported with the same fix.
 
-### Known limit: a Mailable sent during an Inertia request
+### Decided: mail sent from a client page is recognised on the call stack
 
-A notification is recognised while it is sent, through Laravel's own `NotificationSending` and `NotificationSent` events, and is always translated. A `Mailable` sent synchronously while serving an Inertia page has no event before it renders, so its `__()` calls answer as the page does, with the source. Queued mail has no request, and is translated. Laravel offers no hook before a Mailable renders; routing mail through a notification, or queueing it, avoids the limit.
+A notification is recognised while it is sent, through Laravel's own `NotificationSending` and `NotificationSent` events. Laravel has no event before a `Mailable` or a mailed view renders, and `LocaleUpdated` fires only for a Mailable carrying a locale, and for the app's own `setLocale()` alike, so it cannot say mail is rendering. On a CLIENT response, `ResponseKind` reads the call stack instead: a frame whose class is a `Mailable` or Laravel's `Mailer` contract means `__()` serves mail, and mail is translated. The search is bounded at 64 frames, against a measured 26 from `__()` in a Mailable's nested Blade view to `Mailable::send()`, and runs only on client pages, where server-side `__()` is rare.
 
-## Server messages and legacy-key migration
+### Decided: app messages are discovered as value sets are
 
-`docs/server-messages.md` is the plan and the migration guide.
+A message the app defines itself implements the core's `HasAppMessageTemplate` and is found by the same token scan of app/ as FRM-7's declarations (`ClassDiscovery`), plus `langsys.messages.classes`; `langsys:cache` caches both. The core lists each (`MessageCatalog::addMessage()`), builds a class without its constructor and checks its markers against declared properties; a backed enum lists each case. A Laravel rule that also implements the contract stays a rule, listed per field. `langsys:sync` hands the core's plan the discovered classes and the templates the listing lists, so the `__()` that states a listed message never registers as a bare phrase too.
+
+### Decided: Blade marks printed values; it ships with its readers
+
+A Blade precompiler routes every `{{ }}` in visible text through `ValueMarker::value()`, which wraps the escaped value in `<!--ls:NAME-->…<!--/ls-->` (VAR-3, VAR-5); names follow the shared VAR-2 table (`PlaceholderNames`, the fleet's vectors executed in the tests). Attributes, raw-text elements, comments, `{!! !!}`, `Htmlable` values and translation calls are never marked. The echo stays a Blade echo, so Laravel's escaping, double encoding and echo handlers apply. VAR-4: it ships in the wave that releases the PHP and TypeScript readers, never before.
 
 ### Not built: two guards
 

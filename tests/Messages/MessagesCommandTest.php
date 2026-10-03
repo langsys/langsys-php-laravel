@@ -2,9 +2,11 @@
 
 namespace Langsys\Laravel\Tests\Messages;
 
+use Langsys\Laravel\Messages\AppMessageSource;
 use Langsys\Laravel\Messages\FormRequestSource;
 use Langsys\Laravel\Tests\Fakes\FakeClient;
 use Langsys\Laravel\Tests\Fixtures\Http\FormController;
+use Langsys\Laravel\Tests\Fixtures\Http\SlugRule;
 use Langsys\Laravel\Tests\TestCase;
 use Langsys\SDK\Client;
 use Langsys\SDK\Messages\MessageCatalog;
@@ -46,7 +48,8 @@ class MessagesCommandTest extends TestCase
 
     private function _catalog(): MessageCatalog
     {
-        return MessageCatalogCommand::collect([FormRequestSource::fromRoutes($this->app['router'])]);
+        // The sources the commands list, as they list them.
+        return MessageCatalogCommand::collect([FormRequestSource::fromRoutes($this->app['router']), AppMessageSource::discovered()]);
     }
 
     private function _templates(): array
@@ -222,6 +225,27 @@ class MessagesCommandTest extends TestCase
     {
         $this->assertStringContainsString('UnlistableRequest: withValidator() cannot run outside a request', implode("\n", $this->_catalog()->advice()));
         $this->assertStringContainsString('UnlistableRequest.code: uses the rule object', implode("\n", $this->_catalog()->problems()), 'The fields are still listed.');
+    }
+
+    /**
+     * MSG-7: a message the app defines itself is listed once under the category with its template
+     * and code; a class that is also a validation rule is listed per field only, as a rule.
+     */
+    public function testAnAppMessageIsListedOnceWithItsCode(): void
+    {
+        config()->set('langsys.messages.classes', [\Langsys\Laravel\Tests\Fixtures\sync\app\QuotaExceeded::class, \Langsys\Laravel\Tests\Fixtures\sync\app\ApiErrors::class, SlugRule::class, \Langsys\Laravel\Tests\Fixtures\Http\PlainSlugRule::class]);
+        $catalog = $this->_catalog();
+        $listed = array_column($catalog->templates(), null, 'template');
+
+        $this->assertSame('quota_exceeded', $listed['You have used all {limit} requests this month.']['code'] ?? null);
+        $this->assertArrayHasKey('The profile handle must be a slug.', $listed, 'The rule is listed per field.');
+        $this->assertArrayNotHasKey('The :attribute must be a slug.', $listed, 'And never as an app message.');
+        $this->assertArrayNotHasKey('Must be a slug.', $listed, 'A Laravel rule is a rule, whatever else it implements.');
+        $this->assertSame('not_found', $listed['That record does not exist.']['code'] ?? null, 'An enum lists each case.');
+        $this->assertSame('forbidden', $listed['You may not change this record.']['code'] ?? null);
+        $this->assertSame([], array_values(array_filter($catalog->problems(), fn (string $p) => str_contains($p, 'QuotaExceeded') || str_contains($p, 'ApiErrors'))), 'A typed property fills its marker.');
+
+        $this->artisan('langsys:messages', ['-v' => true])->expectsOutputToContain('You have used all {limit} requests this month.')->assertExitCode(0);
     }
 
     /** MSG-10: the listing names the unlabelled field and passes, `--strict` included. */

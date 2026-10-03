@@ -31,6 +31,7 @@ use Langsys\Laravel\Support\RequestLocaleWiring;
 use Langsys\Laravel\Support\ValueSetDiscovery;
 use Langsys\Laravel\Translation\CatalogTranslator;
 use Langsys\Laravel\Translation\MigrationFiles;
+use Langsys\Laravel\View\ValueMarker;
 use Langsys\SDK\Client;
 use Langsys\SDK\Snapshot\Snapshot;
 use Throwable;
@@ -141,6 +142,22 @@ class LangsysServiceProvider extends ServiceProvider
 
         Blade::directive('lang', $lang);
         Blade::directive('t', $lang);
+
+        // VAR-5: every value Blade prints in visible text is marked, so a reader turns it back into a
+        // placeholder. The echo keeps Blade's own escaping, double encoding included.
+        Blade::precompiler(function (string $template) {
+            if (!config('langsys.enabled')) {
+                return $template;
+            }
+
+            $compiler = $this->app['blade.compiler'];
+            $doubleEncode = (fn () => $this->echoFormat)->call($compiler) === 'e(%s)';
+
+            return ValueMarker::precompile($template, $doubleEncode, fn (string $expression) => $this->app['log']->warning(
+                "Blade prints `$expression` in text, which has no name of its own, so its placeholder is `value`: give it a variable whose name says what it is.",
+                ['view' => $compiler->getPath()]
+            ));
+        });
     }
 
     private function _registerMiddlewareAliases(): void

@@ -9,11 +9,11 @@ class HookedRequest extends FormRequest
 {
     public function rules(): array
     {
-        return ['plan' => 'required'];
+        return ['plan' => 'required', 'handle' => [new SlugRule()]];
     }
 
     public function withValidator($validator): void
     {
-        $validator->setAttributeNames(['plan' => 'billing plan']);
+        $validator->setAttributeNames(['plan' => 'billing plan', 'handle' => 'profile handle']);
     }
 }
