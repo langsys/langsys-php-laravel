@@ -36,6 +36,8 @@ Integrate the Langsys Translation Manager into your Laravel application — Blad
 
 Upgrading from 1.x? [`UPGRADING.md`](UPGRADING.md) covers each change.
 
+Trying an unreleased branch against your own checkouts? [`docs/local-testing.md`](docs/local-testing.md) walks through installing from path repositories and checking each feature.
+
 ```bash
 composer require langsys/langsys-php-laravel
 php artisan vendor:publish --tag=langsys-config
