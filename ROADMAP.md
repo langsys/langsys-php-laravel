@@ -9,7 +9,7 @@ Graded row by row in `CONFORMANCE.md`. The design decisions and deferred work be
 
 ### Release gate — the core is untagged, and the constraint has to move at publication
 
-This branch depends on the 838 `langsys/langsys-php` core (`7ad91bc`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the rule-object and app-message templates, the offline planner, the server-message API, the snapshot seam, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
+This branch depends on the 838 `langsys/langsys-php` core (`4ef5825`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the rule-object and app-message templates, the offline planner, the server-message API, the snapshot seam, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
 
 - **CI fails on this branch by design.** It installs from Packagist. Against v1.3.1, the boundary tests hit an undefined method, and the delegation probes find no fallback where the wrapper used to have one.
 - **At publication**, the constraint moves to the core's 838 tag and the local path repository (below) goes. The operator publishes every SDK at once, after all of them are green.

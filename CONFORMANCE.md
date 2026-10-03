@@ -4,14 +4,14 @@
 |---|---|
 | **Profiles** | server, binding, all — derived: binding over langsys-php-sdk |
 | **Spec version** | 8.5.8, committed at `83e26af1fc41aa526f3ff96bc5b50c8d7fcb4e92` and unpublished |
-| **Core bound against** | langsys-php-sdk `7ad91bc` (`v1.3.1-95`, `feature/838_write_key_gating_reland`, untagged), whose conformance file is canonical — see *Release gate* |
+| **Core bound against** | langsys-php-sdk `4ef5825` (`v1.3.1-96`, `feature/838_write_key_gating_reland`, untagged), whose conformance file is canonical — see *Release gate* |
 | **Derived** | 2026-10-03T20:23:05Z by `git rev-parse` on the commit above; the text graded is byte-identical to the text read |
 
 **The profile is derived.** The spec's rules name Laravel as an example throughout, but no profile line names a PHP framework binding, so this package takes its core's profiles (`server`, `all`) and adds `binding`.
 
 Every rule id in the spec is rowed exactly once, including the ones that do not bind this package. A row graded `implemented` names a test that fails when the behaviour is removed; the mutation that proves it is in *Mutation record*. `delegated` names the core row it rests on and the absence probe that shows this package does not do the work itself, with a firing control that shows the probe can fail. `contract` rows are proven against the shared contract fixture, vendored in `tests/contract-fixture/` from langsys-js-typescript at tree `d7f89b89` and run by `tests/Contract/`. Counts live only in *Computed summary*, which is produced by a script, not typed.
 
-**A `delegated` row is only as good as the core row it cites, and it is graded that way.** Its tier is `-`, because the behaviour's tier lives on the core row, and the summary resolves each delegated row against the core's current grade, as the fleet checker does. At `7ad91bc` no core row this package delegates to is `not implemented` or `provisional`.
+**A `delegated` row is only as good as the core row it cites, and it is graded that way.** Its tier is `-`, because the behaviour's tier lives on the core row, and the summary resolves each delegated row against the core's current grade, as the fleet checker does. At `4ef5825` no core row this package delegates to is `not implemented` or `provisional`.
 
 Test paths are under `tests/`. In an evidence cell, `::name` continues the last file named in that cell. `M`, `T`, `F`, `P`, `L`, `C`, `V`, `S`, `K`, `R`, `A`, `E`, `N`, `B`, `G`, `W`, `X`, `Z`, `D`, `Q`, `Y` and `U` numbers refer to *Mutation record*.
 
@@ -92,7 +92,7 @@ Found by executing code against the rules — a probe, a real-core test, a contr
 | VAR-1 | implemented | n/a (pure) | A value passed to `__()` travels as a param and fills its `{name}` placeholder after lookup, so one sentence is one phrase for every user: `Translation/CatalogTranslatorTest::testASentenceNoFileHoldsIsConverted`, and the same for a key's line, `::testAGroupKeyRendersTheCatalogTranslationOfItsSourceLine`. A value from a declared set is a word to translate, written in (FRM-7). A page with no markers that `TranslateResponse` walks registers the text it renders, as VAR-7 documents, until VAR-5's emitter ships. Blade marks each value it prints in text (VAR-5), so a page the walk reads registers `Hello {name}` once for every user, `Contract/ServerRenderContractTest::testTwoUsersPagesRegisterOnePhraseWithThePlaceholder`. |
 | VAR-2 | implemented | n/a (pure) | The Blade emitter derives each name from the PHP expression it prints, by the shared table: the naming vectors vendored byte for byte from langsys-js-typescript (blob a4b61ed2) execute row for row, collisions, the unnameable and the reserved markup tokens included, `View/PlaceholderNamesTest::testEverySharedVectorNamesAsTheFleetDoes`; PHP's own expressions read into the vectors' shapes — `$user->name`, `?->`, `['name']`, `count($items)` and `$items->count()` as a length, a call with one argument — `::testPhpExpressionsReadIntoTheSharedShapes`. U10, U11, U12. An expression that can only be named `value` is logged at compile time. |
 | VAR-3 | delegated | - | Core `VAR-3`: implemented; the page walk and `translateRich()` read both marker forms. The binding reads and emits no marker: `BindingBoundaryTest::testTheBindingReimplementsNoIdentityOrRenderingBehaviour` forbids `data-ls-` in code. |
-| VAR-4 | partial | - | **Met:** every reader that can meet the Blade emitter's output reads markers — core `VAR-3` at `6e72a14` (the page walk, `translateRich()`) and langsys-js-typescript `VAR-3` at `473387b0` (a browser SDK on the page). **Not met:** neither is released; the emitter ships in the same wave as its readers, never before them. |
+| VAR-4 | partial | - | **Met:** every reader that can meet the Blade emitter's output reads markers — core `VAR-3` at `4ef5825` (the page walk, `translateRich()`) and langsys-js-typescript `VAR-3` at `ab408561` (a browser SDK on the page). **Not met:** neither is released; the emitter ships in the same wave as its readers, never before them. |
 | VAR-5 | implemented | contract | A Blade precompiler marks every value printed in visible text with the comment pair, named by VAR-2, and nothing else: `View/ValueMarkerTest::testAValuePrintedInTextIsMarkedWithItsName`, `::testNamesResolveWithinAPhrase`; an attribute, `script`, `style`, `title`, `textarea`, an HTML comment, `{!! !!}`, a value that is already HTML and a translation call are left alone, `::testNothingOutsideVisibleTextIsMarked`; Blade's escaping and double encoding are kept, `::testBladesOwnEscapingIsKept`; switched off, nothing is marked, `::testSwitchedOffNothingIsMarked`. Against the double, two users' pages walked register one phrase with the placeholder and neither name, `Contract/ServerRenderContractTest::testTwoUsersPagesRegisterOnePhraseWithThePlaceholder`. U1 to U9. Shipping waits on VAR-4. |
 | VAR-6 | n/a (architecture: Blade renders on the server and has no component compile step; a server template is marked at render, VAR-5) | - | Build-time transforms belong to the JS component bindings. |
 | VAR-7 | delegated | - | Core `VAR-7`: implemented. `langsys:sync` registers nothing for a call it cannot read as a literal, and reports it, `Contract/SyncContractTest::testANonLiteralCallIsReportedWithItsFileAndLineAndFailsStrict`. |
@@ -379,7 +379,7 @@ as graded in this file
   partial                         1
   not implemented                 0
   held (strip ruling)             0
-delegated rows resolved against langsys-php-sdk 7ad91bc
+delegated rows resolved against langsys-php-sdk 4ef5825
   implemented                     55
 counting red                      VAR-4
 GREEN, provisional counted apart  no
