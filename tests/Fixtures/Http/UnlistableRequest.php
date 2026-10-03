@@ -19,6 +19,12 @@ class UnlistableRequest extends FormRequest
         ];
     }
 
+    /** Needs the request: listing ahead of time cannot run it. */
+    public function withValidator($validator): void
+    {
+        $validator->setAttributeNames(['note' => $this->user()->name]);
+    }
+
     public function messages(): array
     {
         return ['note.required' => 'Write a :thing here.'];

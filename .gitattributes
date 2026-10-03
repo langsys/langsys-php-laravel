@@ -6,7 +6,7 @@
 # Takes effect on the NEXT tag: dist archives are built per release, so v1.0.0
 # keeps shipping what it shipped.
 #
-# Deliberately kept in the archive: README.md, CHANGELOG.md and LICENSE, which
+# Deliberately kept in the archive: README.md, CHANGELOG.md, UPGRADING.md and LICENSE, which
 # are the files someone reads from inside vendor/ or that packaging tooling
 # expects to find.
 

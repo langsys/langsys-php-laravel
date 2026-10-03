@@ -2,9 +2,9 @@
 
 namespace Langsys\Laravel\Tests;
 
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Blade;
-use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Translation\Translator;
 use Langsys\Laravel\Support\ClientState;
@@ -72,7 +72,7 @@ class NoCredentialsTest extends TestCase
         config()->set(['langsys.api_key' => 'test-key', 'langsys.project_id' => 'test-project', 'langsys.api_url' => self::UNREACHABLE_API]);
         $plain = new Translator($this->app['translation.loader'], 'en');
         $plain->setFallback('en');
-        Exceptions::fake();
+        $reported = $this->_reported();
 
         foreach ([['Hello :name', ['name' => 'Ana']], ['messages.welcome', ['name' => 'Ana']], ['Save', []]] as [$key, $replace]) {
             $this->assertSame($plain->get($key, $replace), __($key, $replace, 'es-ES'), $key);
@@ -80,12 +80,12 @@ class NoCredentialsTest extends TestCase
 
         $this->assertSame($plain->choice('messages.apples', 3), trans_choice('messages.apples', 3, [], 'es-ES'));
         $this->assertTrue($this->app->resolved(Client::class), 'Control: the real client was built and asked.');
-        Exceptions::assertNothingReported();
+        $this->assertSame([], $reported->getArrayCopy(), 'Nothing reported.');
     }
 
     public function testAPageAndAFailedFormStillServe(): void
     {
-        Exceptions::fake();
+        $reported = $this->_reported();
 
         $this->get('/pricing?locale=es-ES')->assertOk()->assertSee('<p>Hello Ana</p><p>Welcome back, Ana</p>', false);
 
@@ -93,14 +93,29 @@ class NoCredentialsTest extends TestCase
         $this->assertSame($response->json('errors.cc_number.0'), $response->json('langsys_errors.0.message'), 'The source, as with nothing in the catalog.');
 
         $this->assertFalse($this->app->resolved(Client::class));
-        Exceptions::assertNothingReported();
+        $this->assertSame([], $reported->getArrayCopy(), 'Nothing reported.');
     }
 
-    public function testSyncSaysWhatItNeeds(): void
+    /**
+     * F4: with no key, `langsys:sync` registers nothing and says what it needs, and `--dry-run` plans
+     * offline: every phrase counts as new, and `--strict` still fails on a call it cannot read as a
+     * literal — the gate a CI job with no secrets holds.
+     */
+    public function testSyncChecksWithoutAKeyAndRegistersOnlyWithOne(): void
     {
-        $this->artisan('langsys:sync', ['--dry-run' => true])
-            ->expectsOutputToContain('langsys:sync needs LANGSYS_API_KEY and LANGSYS_PROJECT_ID')
+        config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/sync/app']);
+
+        $this->artisan('langsys:sync')
+            ->expectsOutputToContain('langsys:sync needs LANGSYS_API_KEY and LANGSYS_PROJECT_ID to register')
             ->assertExitCode(1);
+
+        $this->artisan('langsys:sync', ['--dry-run' => true])
+            ->expectsOutputToContain('No key: nothing is compared with the catalog')
+            ->expectsOutputToContain('OrderController.php:12: __() is called with something that is not a literal')
+            ->assertExitCode(0);
+
+        $this->artisan('langsys:sync', ['--dry-run' => true, '--strict' => true])->assertExitCode(1);
+        $this->assertFalse($this->app->resolved(Client::class), 'No client was built.');
     }
 
     public function testTheCauseIsReportedOncePerProcessAtDebug(): void
@@ -112,4 +127,14 @@ class NoCredentialsTest extends TestCase
 
         Log::shouldHaveReceived('debug')->once()->withArgs(fn (string $message) => str_contains($message, 'LANGSYS_API_KEY'));
     }
+
+    /** What Laravel's exception handler is asked to report from here on (Laravel 10 has no Exceptions::fake()). */
+    private function _reported(): \ArrayObject
+    {
+        $reported = new \ArrayObject();
+        $this->app->make(ExceptionHandler::class)->reportable(fn (\Throwable $e) => $reported->append($e::class . ': ' . $e->getMessage()));
+
+        return $reported;
+    }
+
 }

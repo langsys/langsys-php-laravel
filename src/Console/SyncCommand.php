@@ -8,9 +8,11 @@ use Illuminate\View\Compilers\BladeCompiler;
 use Langsys\Laravel\Messages\FormRequestSource;
 use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\LaravelLocales;
+use Langsys\Laravel\Support\ValueSetDiscovery;
 use Langsys\Laravel\Translation\MigrationFiles;
 use Langsys\SDK\Client;
 use Langsys\SDK\Messages\MessageCatalogCommand;
+use Langsys\SDK\Sync\Planner;
 use Langsys\SDK\Sync\SourceScanner;
 use Langsys\SDK\Sync\SyncPlan;
 use RecursiveDirectoryIterator;
@@ -70,18 +72,28 @@ class SyncCommand extends Command
 
     private function _sync(): int
     {
-        // Sync diffs against the project's catalog and registers into it: it needs the project.
-        if (!ClientState::buildable($this->laravel)) {
-            $this->error('langsys:sync needs LANGSYS_API_KEY and LANGSYS_PROJECT_ID: a write key to register, or any key for --dry-run.');
+        // Registering needs the project. A dry run without one plans offline: nothing is compared
+        // with the catalog, so every phrase counts as new, and every check `--strict` makes still
+        // runs — the gate a CI job with no secrets can hold.
+        $online = ClientState::buildable($this->laravel);
+
+        if (!$online && !$this->option('dry-run')) {
+            $this->error('langsys:sync needs LANGSYS_API_KEY and LANGSYS_PROJECT_ID to register; --dry-run checks without them.');
 
             return self::FAILURE;
         }
 
-        $client = $this->laravel->make(Client::class);
         [$hits, $files] = $this->_hits();
+        $options = ['covered_groups' => $this->_validatorGroups()];
 
         try {
-            $plan = $client->planSync($hits, $this->_targets($client), ['covered_groups' => $this->_validatorGroups()]);
+            if ($online) {
+                $client = $this->laravel->make(Client::class);
+                $plan = $client->planSync($hits, $this->_targets($client), $options);
+            } else {
+                $this->line('No key: nothing is compared with the catalog, so every phrase counts as new.');
+                $plan = Planner::offline($hits, $this->_migration(), ValueSetDiscovery::classes(), $options);
+            }
         } catch (Throwable $e) {
             $this->error('Cannot plan the sync: ' . $e->getMessage());
 
@@ -242,6 +254,14 @@ class SyncCommand extends Command
         }
 
         return $targets;
+    }
+
+    /** The base-language files, as the provider hands them to the client. */
+    private function _migration(): ?array
+    {
+        return config('langsys.enabled')
+            ? MigrationFiles::for($this->laravel['translation.loader'], $this->laravel->langPath(), $this->laravel['config']['app.fallback_locale'])
+            : null;
     }
 
     /**

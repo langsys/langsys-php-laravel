@@ -12,6 +12,7 @@ use Langsys\Laravel\Messages\MessageValidator;
 use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\RequestLocaleWiring;
 use Langsys\SDK\Client;
+use Langsys\SDK\Locale\LocaleDetector;
 use Langsys\SDK\Messages\ServerMessage;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -38,6 +39,13 @@ class AttachServerMessages
     public function handle(Request $request, Closure $next): Response
     {
         $key = config('langsys.messages.response_key');
+
+        // No key: the error envelope is the application's own, and it composes its entries from
+        // the validator's serverMessages() itself.
+        if ($key === null || $key === '') {
+            return self::_namesItsLanguage($next($request));
+        }
+
         $flashed = $request->hasSession() ? $request->session()->get($key) : null;
 
         if ($flashed && class_exists(Inertia::class)) {
@@ -48,7 +56,7 @@ class AttachServerMessages
         $messages = $this->_messages($response);
 
         if ($messages === []) {
-            return $response;
+            return self::_namesItsLanguage($response);
         }
 
         if ($response instanceof JsonResponse) {
@@ -65,6 +73,24 @@ class AttachServerMessages
 
         if ($response instanceof RedirectResponse && $request->hasSession()) {
             $request->session()->flash($key, self::_entries($messages));
+        }
+
+        return $response;
+    }
+
+    /**
+     * FRM-5: any JSON error body's `message` — a 403, a 404, `abort()` — was written by `__()` in the
+     * locale this request rendered in, so the response names it, as the validation path does. A
+     * response that already names its language is the application's.
+     */
+    private static function _namesItsLanguage(Response $response): Response
+    {
+        if ($response instanceof JsonResponse && !$response->headers->has('Content-Language') && ClientState::buildable()) {
+            $data = $response->getData(true);
+
+            if (is_array($data) && is_string($data['message'] ?? null)) {
+                $response->headers->set('Content-Language', LocaleDetector::normalize(app()->getLocale()));
+            }
         }
 
         return $response;

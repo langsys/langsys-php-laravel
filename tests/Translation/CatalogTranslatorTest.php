@@ -252,8 +252,9 @@ class CatalogTranslatorTest extends TestCase
      */
     public function testResolvingTheTranslatorDoesNotBuildTheClient(): void
     {
+        // Unset first: Laravel 10 rebuilds an abstract that was already resolved the moment it is rebound.
+        unset($this->app[Client::class]);
         $this->app->bind(Client::class, fn () => throw new RuntimeException('The Client was built.'));
-        $this->app->forgetInstance(Client::class);
         $this->app->forgetInstance('translator');
 
         $translator = $this->app->make('translator');

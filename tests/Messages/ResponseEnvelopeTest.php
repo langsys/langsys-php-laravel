@@ -3,6 +3,7 @@
 namespace Langsys\Laravel\Tests\Messages;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
 use Langsys\Laravel\Tests\TestCase;
 use Langsys\SDK\Client;
 
@@ -43,6 +44,24 @@ class ResponseEnvelopeTest extends TestCase
             ->assertJsonPath('langsys_errors.0.field', 'cc_number')
             ->assertJsonPath('langsys_errors.0.template', 'The cc number field is required.')
             ->assertJsonPath('langsys_errors.0.message', 'The cc number field is required.');
+    }
+
+    /**
+     * An API with its own error envelope sets no key: nothing is attached or flashed, Laravel's body
+     * is all there is, and the entries are still the validator's for the app's handler to compose.
+     */
+    public function testNoKeyLeavesTheEnvelopeToTheApp(): void
+    {
+        config()->set('langsys.messages.response_key', '');
+
+        $this->assertSame(['message', 'errors'], array_keys($this->postJson('/api/cards', [])->assertStatus(422)->json()));
+
+        $this->from('/cards/new')->post('/cards', [])->assertRedirect('/cards/new');
+        $this->assertSame([], array_filter(session()->all(), fn ($value, $key) => str_contains((string) $key, 'langsys'), ARRAY_FILTER_USE_BOTH));
+
+        $validator = Validator::make([], ['cc_number' => 'required']);
+        $validator->fails();
+        $this->assertSame('required', $validator->serverMessages()[0]->getCode(), 'The entries are the app\'s to compose.');
     }
 
     public function testTheKeyIsConfigurable(): void

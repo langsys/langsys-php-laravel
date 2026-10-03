@@ -19,6 +19,16 @@ class FormController
         return 'ok';
     }
 
+    public function hooked(HookedRequest $request)
+    {
+        return 'ok';
+    }
+
+    public function import(\Langsys\Laravel\Tests\Fixtures\Data\ImportData $data)
+    {
+        return 'ok';
+    }
+
     public function device(UnlabelledRequest $request)
     {
         return 'ok';

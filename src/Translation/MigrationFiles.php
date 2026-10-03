@@ -25,7 +25,7 @@ final class MigrationFiles
         $own = array_merge(self::_json($langPath, $locale), self::_groups($langPath, $locale));
 
         $fallback = [];
-        $paths = method_exists($loader, 'paths') ? $loader->paths() : [$langPath];
+        $paths = self::_paths($loader, $langPath);
 
         // The loader lets a later path override an earlier one, so the tier reads them last first.
         foreach (array_reverse($paths) as $path) {
@@ -52,6 +52,23 @@ final class MigrationFiles
             'fallback_files' => $fallback,
             'namespaces'     => $namespaces,
         ];
+    }
+
+    /**
+     * The paths Laravel's own loader reads, the framework's bundled English first. Laravel 11 has
+     * `paths()`; Laravel 10's loader reads the same list but keeps it to itself.
+     *
+     * @return list<string>
+     */
+    private static function _paths(Loader $loader, string $langPath): array
+    {
+        if (method_exists($loader, 'paths')) {
+            return $loader->paths();
+        }
+
+        $paths = (fn () => property_exists($this, 'paths') ? (array) $this->paths : null)->call($loader);
+
+        return $paths ?? [$langPath];
     }
 
     /**

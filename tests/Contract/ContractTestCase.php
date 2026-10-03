@@ -8,7 +8,7 @@ use Langsys\SDK\Client;
 /**
  * Tests against the shared contract fixture (CONF-2): the Langsys API double in
  * tests/contract-fixture/, vendored byte for byte from langsys-js-typescript at tree
- * 542f57f5ffcb9038db1b7411152b7e31b96cb269. It can refuse a request and it holds state, so these
+ * d7f89b89f911a90a06fc511ac72f8e0e913d4af3. It can refuse a request and it holds state, so these
  * tests assert on what the server accepted — the state read back — never on what the SDK sent.
  *
  * The Client under test is the one this package's provider builds from Laravel's config, over
@@ -126,6 +126,23 @@ abstract class ContractTestCase extends TestCase
         $state = $this->fixture('GET', '/state');
 
         return array_map(fn (array $phrase) => [$phrase['category'], $phrase['phrase']], $state['projects'][self::PROJECT]['phrases'] ?? []);
+    }
+
+    /**
+     * Accepted state: the translations the server stored on each phrase, keyed "category|phrase"
+     * (category '' for none).
+     *
+     * @return array<string, array<string, string>>
+     */
+    protected function storedTranslations(): array
+    {
+        $stored = [];
+
+        foreach ($this->fixture('GET', '/state')['projects'][self::PROJECT]['phrases'] ?? [] as $phrase) {
+            $stored[($phrase['category'] ?? '') . '|' . $phrase['phrase']] = $phrase['translations'] ?? [];
+        }
+
+        return $stored;
     }
 
     private function fixture(string $method, string $path, ?array $body = null): ?array

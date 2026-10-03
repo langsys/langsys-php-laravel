@@ -43,6 +43,7 @@ class SyncContractTest extends ContractTestCase
             [null, 'Pay {amount} now'],
             [null, '{count, plural, one {# item} other {# items}}'],
             [null, 'Place order'],
+            [null, 'Ship to {city}'],
         ] as $phrase) {
             $this->assertContains($phrase, $registered);
         }
@@ -90,6 +91,22 @@ class SyncContractTest extends ContractTestCase
             ->assertExitCode(0);
 
         $this->artisan('langsys:sync', ['--dry-run' => true, '--strict' => true])->assertExitCode(1);
+    }
+
+    /**
+     * MIG-9 against the server: a line the other locales' lang files translate registers in one call
+     * with those translations, and the server stores them on the phrase — converted as the source
+     * is, so the stored Spanish carries `{name}`. A phrase no lang file translates registers bare.
+     */
+    public function testALineTheLangFilesTranslateIsStoredWithItsTranslations(): void
+    {
+        $this->artisan('langsys:sync')->assertExitCode(0);
+
+        $stored = $this->storedTranslations();
+
+        $this->assertSame(['es-es' => 'Bienvenido de nuevo, {name}'], $stored['messages|Welcome back, {name}'] ?? null);
+        $this->assertSame(['es-es' => 'Realizar pedido'], $stored['|Place order'] ?? null);
+        $this->assertSame([], $stored['|Pay {amount} now'] ?? null, 'Control: a phrase no lang file translates registers bare.');
     }
 
     /** The plan counts a line the other locales' files translate, which registers with those translations. */

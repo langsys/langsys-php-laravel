@@ -63,7 +63,7 @@ The SDK interpolates on its own degraded paths too, so a failure never renders a
 
 `CONFORMANCE.md` grades this package against every rule id in the SDK behaviour spec (`langsys2` `docs/sdk-spec.mdx`), re-derived from the cited blob on every write. The binding rules decide most of it: **a binding adapts shape and timing, never meaning** (BIND-1). `tests/BindingBoundaryTest.php` is the absence-probe set — token scans for capability, network and identity/rendering constructs, each with a firing control, plus the pinned public surface (BIND-6) and config surface (BIND-4). A change that trips one of those scans is a reimplementation until argued otherwise; argue it in `CONFORMANCE.md`, not by widening the scan.
 
-**Three changes are in the code but pending the operator's ruling, not accepted:** the removal of `auto_flush`, the removal of the `TranslateResponse` page cache, and the lowercase `initialTranslationsLocale`. Do not treat them as settled or build on them. `ROADMAP.md` records the restore path for each, and `CONFORMANCE.md` records what each row becomes if one is reverted.
+**Three 1.x behaviours changed in 2.0.0 by the operator's ruling:** `auto_flush` is removed, the `TranslateResponse` page cache is removed, and `initialTranslationsLocale` is lowercase. `ROADMAP.md` records why, and `UPGRADING.md` tells 1.x users.
 
 ## Conventions
 

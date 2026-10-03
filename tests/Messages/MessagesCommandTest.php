@@ -33,6 +33,8 @@ class MessagesCommandTest extends TestCase
         $router->post('/odd', [FormController::class, 'odd']);
         $router->post('/teams/{team}', [FormController::class, 'team']);
         $router->post('/orders', [FormController::class, 'order']);
+        $router->post('/plans', [FormController::class, 'hooked']);
+        $router->post('/imports', [FormController::class, 'import']);
         $router->get('/closure', fn () => 'no request class');
     }
 
@@ -196,6 +198,30 @@ class MessagesCommandTest extends TestCase
         $this->assertStringContainsString('StorePaymentRequest.holder: has no declared label, so Laravel prints "holder"', $advice);
         $this->assertStringNotContainsString('StorePaymentRequest.cc_number: has no declared label', $advice);
         $this->assertStringNotContainsString('has no declared label', implode("\n", $this->_catalog()->problems()), 'Advice, not a problem.');
+    }
+
+    /**
+     * MSG-10: the validator is configured as the framework configures it — a FormRequest's
+     * `withValidator()`, and laravel-data's, which labels the concrete keys it hands Laravel — so
+     * those labels are written in and the fields are not named as unlabelled.
+     */
+    public function testLabelsSetInWithValidatorAreWrittenIn(): void
+    {
+        $templates = $this->_templates();
+        $advice = implode("\n", $this->_catalog()->advice());
+
+        $this->assertContains('The billing plan field is required.', $templates);
+        $this->assertContains('The phrase field is required.', $templates);
+        $this->assertNotContains('The items.0.phrase field is required.', $templates);
+        $this->assertStringNotContainsString('HookedRequest.plan: has no declared label', $advice);
+        $this->assertStringNotContainsString('ImportData.items.0.phrase: has no declared label', $advice);
+    }
+
+    /** A `withValidator()` that needs the request is skipped and said once; the fields are still listed. */
+    public function testAWithValidatorThatNeedsTheRequestIsSkippedAndSaid(): void
+    {
+        $this->assertStringContainsString('UnlistableRequest: withValidator() cannot run outside a request', implode("\n", $this->_catalog()->advice()));
+        $this->assertStringContainsString('UnlistableRequest.code: uses the rule object', implode("\n", $this->_catalog()->problems()), 'The fields are still listed.');
     }
 
     /** MSG-10: the listing names the unlabelled field and passes, `--strict` included. */

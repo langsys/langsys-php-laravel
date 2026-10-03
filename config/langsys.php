@@ -114,7 +114,10 @@ return [
          * Where the entries sit in your error responses. Laravel's own body is
          * untouched — `message` and `errors` keep their shape and their text —
          * and the entries travel beside them under this key, for a client SDK
-         * to render translated.
+         * to render translated. Set it empty when your API has its own error
+         * envelope: nothing is attached, and your handler reads the entries from
+         * the ValidationException's validator (`serverMessages()`) and
+         * translates them with `Client::translateMessage()`.
          */
         'response_key' => env('LANGSYS_MESSAGES_RESPONSE_KEY', 'langsys_errors'),
 

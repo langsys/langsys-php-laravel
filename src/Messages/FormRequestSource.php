@@ -73,17 +73,19 @@ final class FormRequestSource implements MessageSource
             $source = class_basename($class);
 
             try {
-                [$rules, $messages, $attributes] = self::_declared($class);
+                [$rules, $messages, $attributes, $hook] = self::_declared($class);
             } catch (Throwable $e) {
                 $catalog->problem($source, "can't build its rules outside a request: {$e->getMessage()}", 'build rules() from the class alone, or list these messages as templates the app declares');
 
                 continue;
             }
 
+            $configure = self::_configure($catalog, $source, $hook);
+
             // One field that cannot be listed is reported; the rest of the app is still listed.
             foreach ($rules as $field => $fieldRules) {
                 try {
-                    $this->_collectField($catalog, $source, (string) $field, $fieldRules, $rules, $messages, $attributes);
+                    $this->_collectField($catalog, $source, (string) $field, $fieldRules, $rules, $messages, $attributes, $configure);
                 } catch (Throwable $e) {
                     $catalog->problem($source, "cannot be listed: {$e->getMessage()}", 'give this field a message the listing can read without a request, or report it if the rule is a package\'s', (string) $field);
                 }
@@ -91,28 +93,60 @@ final class FormRequestSource implements MessageSource
         }
     }
 
-    private function _collectField(MessageCatalog $catalog, string $source, string $field, mixed $fieldRules, array $rules, array $messages, array $attributes): void
+    /**
+     * The validator a failing request is checked by, configured as the framework configures it:
+     * a FormRequest's `withValidator()`, or a laravel-data DTO's, which can set labels and option
+     * names (`setAttributeNames()`, `setValueNames()`) the declared arrays do not carry. A hook that
+     * cannot run outside a request is skipped, and said once.
+     *
+     * @param  ?\Closure(\Illuminate\Validation\Validator): void  $hook
+     * @return \Closure(\Illuminate\Validation\Validator): \Illuminate\Validation\Validator
+     */
+    private static function _configure(MessageCatalog $catalog, string $source, ?\Closure $hook): \Closure
     {
+        $failed = false;
+
+        return function (\Illuminate\Validation\Validator $validator) use ($catalog, $source, $hook, &$failed) {
+            if ($hook === null || $failed) {
+                return $validator;
+            }
+
+            try {
+                $hook($validator);
+            } catch (Throwable $e) {
+                $failed = true;
+                $catalog->advise($source, "withValidator() cannot run outside a request: {$e->getMessage()}", 'labels and option names it sets are not in the listing; declare them in attributes() to list them');
+            }
+
+            return $validator;
+        };
+    }
+
+    private function _collectField(MessageCatalog $catalog, string $source, string $field, mixed $fieldRules, array $rules, array $messages, array $attributes, \Closure $configure): void
+    {
+        $make = fn (array $data) => $configure(Validator::make($data, $rules, $messages, $attributes));
+        $attribute = str_replace('*', '0', $field);
+        $data = Arr::undot([$attribute => null]);
+        $labelled = $make($data);
+        $declared = array_key_exists($field, $attributes) || array_key_exists($field, $labelled->customAttributes) || array_key_exists($attribute, $labelled->customAttributes);
+
         // A wildcard field fails under a concrete path (`lines.0.qty`). With no label Laravel writes
         // that path into the sentence, so each index is its own phrase and none can be listed.
-        if (str_contains($field, '*') && !array_key_exists($field, $attributes)) {
+        if (str_contains($field, '*') && !$declared) {
             $catalog->problem($source, 'has no label, so each index is written into its own sentence', 'give it a label in attributes()', $field);
 
             return;
         }
 
-        $attribute = str_replace('*', '0', $field);
-        $data = Arr::undot([$attribute => null]);
-
         // MSG-10: advice, never a failure, `--strict` included. Laravel's derived name is sometimes a raw key.
-        if (!array_key_exists($field, $attributes)) {
-            $shown = Validator::make($data, $rules, $messages, $attributes)->getDisplayableAttribute($attribute);
+        if (!$declared) {
+            $shown = $labelled->getDisplayableAttribute($attribute);
             $catalog->advise($source, "has no declared label, so Laravel prints \"$shown\"", 'declare one in attributes() if that is not what users should read', $field);
         }
 
         foreach ((new ValidationRuleParser($data))->explode([$attribute => $fieldRules])->rules[$attribute] ?? [] as $rule) {
             if (!is_string($rule)) {
-                $this->_collectRuleObject($catalog, $source, $field, $attribute, $rule, Validator::make($data, $rules, $messages, $attributes));
+                $this->_collectRuleObject($catalog, $source, $field, $attribute, $rule, $make($data));
 
                 continue;
             }
@@ -128,7 +162,7 @@ final class FormRequestSource implements MessageSource
                 $data = array_replace_recursive($data, Arr::undot([$parameters[0] => $parameters[1]]));
             }
 
-            $validator = Validator::make($data, $rules, $messages, $attributes);
+            $validator = $make($data);
             $entry = ValidatorMessages::forRule($validator, $attribute, $name, $parameters);
 
             if ($entry === null) {
@@ -205,7 +239,9 @@ final class FormRequestSource implements MessageSource
 
         $call = fn (string $method) => method_exists($request, $method) ? (array) app()->call([$request, $method]) : [];
 
-        return [$call('rules'), $call('messages'), $call('attributes')];
+        $hook = method_exists($request, 'withValidator') ? fn ($validator) => $request->withValidator($validator) : null;
+
+        return [$call('rules'), $call('messages'), $call('attributes'), $hook];
     }
 
     /**
@@ -223,7 +259,7 @@ final class FormRequestSource implements MessageSource
             ->execute($class, $payload, $path, \Spatie\LaravelData\Support\Validation\DataRules::create());
         $declared = app(\Spatie\LaravelData\Resolvers\DataValidationMessagesAndAttributesResolver::class)->execute($class, $payload, $path);
 
-        return [$rules, $declared['messages'] ?? [], $declared['attributes'] ?? []];
+        return [$rules, $declared['messages'] ?? [], $declared['attributes'] ?? [], fn ($validator) => $class::withValidator($validator)];
     }
 
     /** @param  list<class-string>  $chain  The classes above this one, so a recursive DTO stops. */
