@@ -93,7 +93,17 @@ An entry is the core's: `{field?, code?, message, template, params?}`. The error
 
 - **JSON 422.** `{message, errors}` keeps its shape and its source-language text. The entries go beside them, each `message` in the request's language (§3.0), under `langsys.messages.response_key`, default `langsys_errors`, and `langsys.messages.pieces` renames an entry's pieces for a client that expects other names. A response middleware, appended to the `web` and `api` groups, reads the `ValidationException` Laravel's pipeline attaches to the response and takes the entries from its validator.
 - **Redirects.** A form that fails and redirects flashes its entries to the session under the same key, beside Laravel's own `errors` bag.
-- **An API with its own error envelope** sets `langsys.messages.response_key` empty. Nothing is attached or flashed; its exception handler reads the entries from the `ValidationException`'s validator (`serverMessages()`) and puts each `message` in the request's language with `Client::translateMessage()`.
+- **An API with its own error envelope** sets `langsys.messages.response_key` empty. Nothing is attached or flashed; its exception handler reads the entries from the `ValidationException`'s validator, which implements `Langsys\Laravel\Messages\HasServerMessages`, and puts each `message` in the request's language with `Client::translateMessage()`. `Langsys\Laravel\Support\ClientState::buildable()` says whether a client can be had — with no key it cannot, and the entries keep their source `message`:
+
+  ```php
+  if ($e->validator instanceof HasServerMessages) {
+      $client = ClientState::buildable() ? app(Client::class) : null;
+
+      foreach ($e->validator->serverMessages() as $entry) {
+          $message = $client?->translateMessage($entry, $locale) ?? $entry->getMessage();
+      }
+  }
+  ```
 - **Inertia (MSG-12).** When `inertiajs/inertia-laravel` is installed, the middleware shares the flashed entries as a page prop under the same key on the way in, before the page renders, so the destination page's JS SDK renders them (MSG-5). Inertia's conditional props are no help here — `lazy` and `optional` withhold a prop from exactly the full page load this has to reach — so the sharing itself is conditional, and a page that follows no failure carries no prop of ours. Inertia's own `errors` prop is untouched. Inertia is a development dependency of this package only.
 - **Category (MSG-6).** `langsys.messages.category`, default `Errors`, is the core's `messages_category`. Rendering, sync and the listing command all use it.
 

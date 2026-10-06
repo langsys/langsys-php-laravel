@@ -73,6 +73,7 @@ class BindingBoundaryTest extends TestCase
         'Langsys\\Laravel\\Messages\\MessageValidator'                   => ['passes', 'serverMessages'],
         'Langsys\\Laravel\\Messages\\AppMessageSource'                   => ['__construct', 'collect', 'discovered'],
         'Langsys\\Laravel\\Messages\\FormRequestSource'                  => ['__construct', 'collect', 'fromRoutes'],
+        'Langsys\\Laravel\\Messages\\HasServerMessages'                  => ['serverMessages'],
         'Langsys\\Laravel\\Messages\\ValidatorMessages'                  => ['forRule', 'fromValidator'],
         'Langsys\\Laravel\\Support\\AppMessageDiscovery'                => ['cache', 'cachePath', 'classes', 'clear', 'isDeclaration', 'within'],
         'Langsys\\Laravel\\Support\\ClassDiscovery'                     => ['within'],

@@ -8,7 +8,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
-use Langsys\Laravel\Messages\MessageValidator;
+use Langsys\Laravel\Messages\HasServerMessages;
 use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\RequestLocaleWiring;
 use Langsys\SDK\Client;
@@ -135,7 +135,7 @@ class AttachServerMessages
     {
         $exception = $response->exception ?? null;
 
-        if (!$exception instanceof ValidationException || !$exception->validator instanceof MessageValidator) {
+        if (!$exception instanceof ValidationException || !$exception->validator instanceof HasServerMessages) {
             return [];
         }
 

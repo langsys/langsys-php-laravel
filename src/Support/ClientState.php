@@ -12,7 +12,8 @@ use Langsys\SDK\Client;
  * files, source — is exactly what Laravel answers on its own, and every runtime site defers to it
  * rather than building a client.
  *
- * @internal
+ * Public: an app that translates something itself — its own error envelope through
+ * `Client::translateMessage()` — asks it first, and falls back to the source when it says no.
  */
 final class ClientState
 {

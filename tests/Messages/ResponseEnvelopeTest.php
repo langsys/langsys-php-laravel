@@ -61,6 +61,7 @@ class ResponseEnvelopeTest extends TestCase
 
         $validator = Validator::make([], ['cc_number' => 'required']);
         $validator->fails();
+        $this->assertInstanceOf(\Langsys\Laravel\Messages\HasServerMessages::class, $validator, 'Read through the public contract.');
         $this->assertSame('required', $validator->serverMessages()[0]->getCode(), 'The entries are the app\'s to compose.');
     }
 

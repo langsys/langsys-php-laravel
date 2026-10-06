@@ -116,8 +116,10 @@ return [
          * and the entries travel beside them under this key, for a client SDK
          * to render translated. Set it empty when your API has its own error
          * envelope: nothing is attached, and your handler reads the entries from
-         * the ValidationException's validator (`serverMessages()`) and
-         * translates them with `Client::translateMessage()`.
+         * the ValidationException's validator — it implements
+         * \Langsys\Laravel\Messages\HasServerMessages — and translates them with
+         * `Client::translateMessage()` when
+         * \Langsys\Laravel\Support\ClientState::buildable() says a client exists.
          */
         'response_key' => env('LANGSYS_MESSAGES_RESPONSE_KEY', 'langsys_errors'),
 

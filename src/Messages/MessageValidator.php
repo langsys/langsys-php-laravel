@@ -25,7 +25,7 @@ use Throwable;
  *
  * @internal
  */
-final class MessageValidator extends Validator
+final class MessageValidator extends Validator implements HasServerMessages
 {
     /** @var list<ServerMessage> */
     private array $serverMessages = [];
