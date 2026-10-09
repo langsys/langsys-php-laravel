@@ -24,6 +24,10 @@ class LangsysServiceProvider extends ServiceProvider
 
             return new Client($config['api_key'], $config['project_id'], [
                 'api_url' => $config['api_url'],
+                // Unset credentials give an unconfigured client that renders
+                // source text (langsys-php 1.4), unless the app opts back in to
+                // failing at boot.
+                'require_credentials' => (bool) ($config['require_credentials'] ?? false),
                 'cache'   => new LaravelCacheAdapter(
                     $app['cache']->store($config['cache']['store']),
                     $config['cache']['prefix'],

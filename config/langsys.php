@@ -18,6 +18,14 @@ return [
     'api_url'    => env('LANGSYS_API_URL', 'https://api.langsys.dev/api'),
 
     /*
+    | With no key or project ID the app still boots: every phrase renders in
+    | the base language and one warning is logged. Set this to true where a
+    | missing credential should stop the app instead (e.g. production).
+    */
+
+    'require_credentials' => (bool) env('LANGSYS_REQUIRE_CREDENTIALS', false),
+
+    /*
     |--------------------------------------------------------------------------
     | Translation catalog cache
     |--------------------------------------------------------------------------

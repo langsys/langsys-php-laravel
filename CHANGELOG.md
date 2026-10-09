@@ -5,6 +5,16 @@ All notable changes to `langsys/langsys-php-laravel` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- **An app without Langsys credentials boots instead of 500ing.** Requires
+  `langsys/langsys-php` ^1.4, whose client renders the base-language text when
+  `LANGSYS_API_KEY` / `LANGSYS_PROJECT_ID` are unset and logs one warning.
+  Set `LANGSYS_REQUIRE_CREDENTIALS=true` (config `langsys.require_credentials`)
+  to fail at boot instead, e.g. in production.
+
 ## 1.0.0 - 2026-08-16
 
 First release. The Laravel integration for [Langsys](https://langsys.dev), wrapping the dependency-free [`langsys/langsys-php`](https://github.com/langsys/langsys-php) with the Laravel-native layer only — the vanilla SDK owns HTTP, phrase lookup, interpolation, token queueing and catalog caching.
