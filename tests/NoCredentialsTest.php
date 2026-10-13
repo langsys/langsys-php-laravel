@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Translation\Translator;
 use Langsys\Laravel\Support\ClientState;
+use Langsys\Laravel\Support\InertiaSsrProps;
 use Langsys\Laravel\Translation\CatalogTranslator;
 use Langsys\SDK\Client;
 
@@ -63,7 +64,19 @@ class NoCredentialsTest extends TestCase
         $this->assertSame($plain->choice('messages.apples', 3), trans_choice('messages.apples', 3));
         $this->assertSame($plain->has('messages.welcome'), $this->app['translator']->has('messages.welcome'));
         $this->assertSame($plain->get('messages.welcome', ['name' => 'Ana']), trim(Blade::render("@lang('messages.welcome', ['name' => 'Ana'])")));
+        $this->assertSame($plain->get('messages.welcome', ['name' => 'Ana']), t('messages.welcome', ['name' => 'Ana']));
+        $this->assertSame($plain->get('messages.welcome', ['name' => 'Ana']), trim(Blade::render("@t('messages.welcome', ['name' => 'Ana'])")));
         $this->assertFalse($this->app->resolved(Client::class), 'No client was built.');
+    }
+
+    /** No seed, so the JS SDK fetches as usual; with no key, asking for one is not an error to report. */
+    public function testTheInertiaSeedIsEmptyAndNothingIsReported(): void
+    {
+        $reported = $this->_reported();
+
+        $this->assertSame(['langsys' => ['initialTranslations' => null, 'initialTranslationsLocale' => null]], InertiaSsrProps::share('es-ES'));
+        $this->assertFalse($this->app->resolved(Client::class), 'No client was built.');
+        $this->assertSame([], $reported->getArrayCopy(), 'Nothing reported.');
     }
 
     /** FRM-3: an API that cannot be reached is a catalog with nothing in it, through the real core. */

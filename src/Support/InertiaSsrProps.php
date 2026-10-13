@@ -34,6 +34,12 @@ class InertiaSsrProps
         // canonicalizes any locale it is handed to.
         $locale = LocaleDetector::normalize($locale ?? app()->getLocale());
 
+        // With no key there is no catalog to seed, and asking for one would build a client the core
+        // refuses to build, reported on every Inertia request rather than once at debug (FRM-3).
+        if (!ClientState::buildable()) {
+            return ['langsys' => ['initialTranslations' => null, 'initialTranslationsLocale' => null]];
+        }
+
         try {
             // The same call t() reads through, so within a request this is the
             // catalog the page was rendered with, answered from the SDK's
