@@ -20,24 +20,37 @@ final class PlaceholderNames
     private const UNWRAPS = ['value', 'current'];
 
     /**
-     * The names one phrase's values take, in order. The same expression twice is one placeholder;
-     * different expressions that would share a name are each prefixed with their previous segment,
-     * then suffixed `_2`, `_3`; an explicit name always wins; a markup token's name is never used.
+     * The names one phrase's values take, in order. The same expression twice is one placeholder
+     * where its shape identifies it; a shape with an unnameable part, or a call whose callee cannot
+     * be spelled, does not, so each such value is its own placeholder however alike it looks.
+     * Different expressions that would share a name are each prefixed with their previous segment,
+     * then suffixed `_2`, `_3`; an explicit name always wins and is never merged; a markup token's
+     * name is never used.
      *
      * @param  list<array{shape: array, source: string, explicit?: ?string}>  $expressions
      * @return array{names: list<string>, unnamed: list<string>} The names, and the sources that fell back to `value`
      */
     public static function names(array $expressions): array
     {
-        $bySource = [];
         $derived = [];
+        $slots = [];
+        $firsts = [];
 
-        foreach ($expressions as $expression) {
-            $source = $expression['source'];
+        foreach ($expressions as $i => $expression) {
+            $merges = ($expression['explicit'] ?? null) === null && self::_identifies($expression['shape']);
+            $same = $merges ? array_search($expression['shape'], $firsts, true) : false;
 
-            if (($expression['explicit'] ?? null) !== null || !array_key_exists($source, $bySource)) {
-                $bySource[$source] = null;
-                $derived[] = $expression;
+            if ($same !== false) {
+                $slots[$i] = $same;
+
+                continue;
+            }
+
+            $slots[$i] = count($derived);
+            $derived[] = $expression;
+
+            if ($merges) {
+                $firsts[$slots[$i]] = $expression['shape'];
             }
         }
 
@@ -55,7 +68,6 @@ final class PlaceholderNames
         $taken = [];
         $unnamed = [];
         $fallbacks = 0;
-        $assigned = [];
 
         foreach ($derived as $i => $expression) {
             if (($expression['explicit'] ?? null) !== null) {
@@ -76,23 +88,10 @@ final class PlaceholderNames
             }
 
             $taken[] = $name;
-            $assigned[$expression['source']] ??= $name;
             $derived[$i]['name'] = $name;
         }
 
-        $names = [];
-        $explicitAt = 0;
-
-        foreach ($expressions as $expression) {
-            if (($expression['explicit'] ?? null) !== null) {
-                $matches = array_values(array_filter($derived, fn ($e) => ($e['explicit'] ?? null) !== null));
-                $names[] = $matches[$explicitAt++]['name'];
-            } else {
-                $names[] = $assigned[$expression['source']];
-            }
-        }
-
-        return ['names' => $names, 'unnamed' => $unnamed];
+        return ['names' => array_map(fn (int $slot) => $derived[$slot]['name'], $slots), 'unnamed' => $unnamed];
     }
 
     /** `firstName` → `first_name`, `userID` → `user_id`. */
@@ -238,6 +237,16 @@ final class PlaceholderNames
         $segments = explode('::', $callee);
 
         return [end($segments), $args];
+    }
+
+    /** Whether an equal shape is the same expression: nothing unnameable in it, and every callee spelled. */
+    private static function _identifies(array $shape): bool
+    {
+        if (isset($shape['call'])) {
+            return $shape['call']['callee'] !== '' && array_reduce($shape['call']['args'], fn (bool $all, array $arg) => $all && self::_identifies($arg), true);
+        }
+
+        return !isset($shape['other']);
     }
 
     /** The segments a name can be built from, or null when the shape is unnameable. */

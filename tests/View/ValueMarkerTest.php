@@ -44,6 +44,31 @@ class ValueMarkerTest extends TestCase
             Blade::render('<p>Hi <b>{{ $a->name }}</b> and {{ $b->name }}</p>', ['a' => (object) ['name' => 'X'], 'b' => (object) ['name' => 'Y']]),
             'An inline element does not end the phrase.'
         );
+        $this->assertSame(
+            '<p><!--ls:value-->3<!--/ls--> and <!--ls:value_2-->8<!--/ls--> or <!--ls:value_3-->1<!--/ls--> and <!--ls:value_4-->2<!--/ls--></p>',
+            Blade::render('<p>{{ $a + $b }} and {{ $c * $d }} or {{ abs($a - $b) }} and {{ abs($c - $d) }}</p>', ['a' => 1, 'b' => 2, 'c' => 4, 'd' => 2]),
+            'Unnameable values are each their own placeholder, however alike their shapes.'
+        );
+        $this->assertSame(
+            '<p><!--ls:name-->Ana<!--/ls--> and <!--ls:name-->Ana<!--/ls--></p>',
+            Blade::render('<p>{{ $name }} and {{ $name }}</p>', ['name' => 'Ana']),
+            'An expression that names itself is one placeholder wherever it repeats.'
+        );
+        $this->assertSame(
+            '<p><!--ls:value-->3<!--/ls--> and <!--ls:value_2-->3<!--/ls--></p>',
+            Blade::render('<p>{{ $a + $b }} and {{ $a + $b }}</p>', ['a' => 1, 'b' => 2]),
+            'An unnameable expression is its own placeholder every time, even when its source repeats.'
+        );
+        $this->assertSame(
+            '<p><!--ls:items_count-->3<!--/ls--> of <!--ls:items_count-->3<!--/ls--></p>',
+            Blade::render('<p>{{ count($items) }} of {{ $items->count() }}</p>', ['items' => collect([1, 2, 3])]),
+            'Two spellings of one shape are one expression.'
+        );
+        $this->assertSame(
+            '<p><!--ls:first_name-->Ana<!--/ls--> or <!--ls:first_name_2-->Bo<!--/ls--></p>',
+            Blade::render('<p>{{ $firstName }} or {{ $first_name }}</p>', ['firstName' => 'Ana', 'first_name' => 'Bo']),
+            'Two shapes that derive one name are two placeholders: the name plays no part in sameness.'
+        );
     }
 
     public function testNothingOutsideVisibleTextIsMarked(): void

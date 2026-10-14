@@ -109,9 +109,9 @@ class RequestScopeTest extends TestCase
     }
 
     /**
-     * A boundary must not build a Client the unit of work never used: without
-     * credentials the SDK's constructor throws, which would fail every job and
-     * every Octane request in an app that has not configured Langsys.
+     * A boundary must not build a Client the unit of work never used: it has
+     * nothing to flush, and every job and every Octane request would pay for
+     * building one.
      */
     public function testABoundaryNeverBuildsAClientNobodyUsed(): void
     {

@@ -34,7 +34,7 @@ class BindingBoundaryTest extends TestCase
     private const NETWORK = [
         'curl_init', 'curl_exec', 'curl_setopt', 'curl_multi_exec', 'fsockopen', 'stream_socket_client',
         'stream_context_create', 'file_get_contents', 'fopen', 'sleep', 'usleep', 'guzzlehttp',
-        'illuminate\\support\\facades\\http', 'x-authorization', 'x-write-grant', 'discovery/hint',
+        'illuminate\\support\\facades\\http', 'x-authorization', 'x-write-grant', 'x-langsys-capabilities', 'discovery/hint',
         'createphrases', 'createcontentblocks', 'registerphrases', 'registercontentblock',
         'queuephraseforregistration', 'queuecontentblockforregistration', 'clearpendingregistrations',
     ];
@@ -113,6 +113,7 @@ class BindingBoundaryTest extends TestCase
         'messages.pieces'             => 'the names of an entry\'s pieces in the application\'s own error body (MSG-1)',
         'messages.response_key'       => 'where the entries sit in the application\'s own error body (MSG-1)',
         'project_id'                  => 'core option',
+        'require_credentials'         => 'core option, under its own name (WIRE-4)',
         'response_kinds'              => 'FRM-4 wiring: the kind of response a route group serves, when the app names it',
         'snapshot'                    => "core `snapshot` option, the file Laravel's config names (SNAP-2)",
         'sync_paths'                  => 'FRM-2 wiring: where the app keeps the source langsys:sync reads',

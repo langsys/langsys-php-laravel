@@ -6,18 +6,20 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Translation\Translator;
+use Langsys\Laravel\Facades\Langsys;
 use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\InertiaSsrProps;
 use Langsys\Laravel\Translation\CatalogTranslator;
 use Langsys\SDK\Client;
+use Langsys\SDK\Exception\ConfigurationException;
 
 /**
  * FRM-1 and FRM-3: installing the package never breaks the app. With no API key — an app's own tests, CI, a
  * fresh checkout — the catalog is empty by definition, so every translate call is exactly what
  * plain Laravel returns, the pages and forms that use this package's middleware still serve, and
- * no client is ever built (the core's constructor throws without credentials). The cause is
- * reported once per process, at debug (FRM-3).
+ * no client is ever built. The cause is reported once per process, at debug (FRM-3).
  */
 class NoCredentialsTest extends TestCase
 {
@@ -34,6 +36,7 @@ class NoCredentialsTest extends TestCase
     {
         $router->middleware(['web', 'langsys.locale', 'langsys.translate-page', 'langsys.flush'])->get('/pricing', fn () => Blade::render('<p>{{ __(\'Hello :name\', [\'name\' => \'Ana\']) }}</p><p>@lang(\'messages.welcome\', [\'name\' => \'Ana\'])</p>'));
         $router->middleware('api')->post('/api/cards', fn (Request $request) => $request->validate(['cc_number' => 'required']));
+        $router->middleware(['web', 'langsys.locale'])->get('/ping', fn () => response()->json(['ok' => true]));
     }
 
     protected function setUp(): void
@@ -139,6 +142,59 @@ class NoCredentialsTest extends TestCase
         __('Save');
 
         Log::shouldHaveReceived('debug')->once()->withArgs(fn (string $message) => str_contains($message, 'LANGSYS_API_KEY'));
+    }
+
+    /**
+     * WIRE-4: outside Laravel's translator the facade asks the core directly, and the core's client
+     * without credentials renders the source with its values filled. Its one warning per process
+     * goes to the PHP error log, kept out of this run's output.
+     */
+    public function testTheFacadeRendersTheSource(): void
+    {
+        $log = ini_set('error_log', '/dev/null');
+
+        try {
+            $this->assertSame('Hello Ana', Langsys::translate('Hello {name}', null, ['name' => 'Ana'], 'es-ES'));
+        } finally {
+            ini_set('error_log', (string) $log);
+        }
+    }
+
+    /**
+     * WIRE-4: with `require_credentials` on, a missing key is an error, as production wants it.
+     * Laravel still boots, so an image build or `config:cache` without secrets completes, and the
+     * first use throws the core's exception, wherever it is: a translate call, the locale
+     * middleware, the Inertia seed, a validator. None of them degrades it to the source.
+     */
+    public function testRequireCredentialsThrowsAtFirstUseNeverAtBoot(): void
+    {
+        $this->get('/ping')->assertOk();
+
+        putenv('LANGSYS_REQUIRE_CREDENTIALS=true');
+
+        try {
+            $this->refreshApplication();
+        } finally {
+            putenv('LANGSYS_REQUIRE_CREDENTIALS');
+        }
+
+        $this->assertTrue(config('langsys.require_credentials'), 'Control: the option is on.');
+        $this->assertFalse($this->app->resolved(Client::class), 'Booting built no client.');
+
+        foreach ([
+            '__()'       => fn () => __('Save'),
+            'Inertia'    => fn () => InertiaSsrProps::share(),
+            'validation' => fn () => Validator::make([], ['name' => 'required'])->fails(),
+        ] as $use => $call) {
+            try {
+                $call();
+                $this->fail("{$use}: the first use throws.");
+            } catch (ConfigurationException $e) {
+                $this->assertStringContainsString('API key is required', $e->getMessage(), $use);
+            }
+        }
+
+        $this->get('/ping')->assertStatus(500);
     }
 
     /** What Laravel's exception handler is asked to report from here on (Laravel 10 has no Exceptions::fake()). */

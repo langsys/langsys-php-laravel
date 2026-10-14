@@ -19,6 +19,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Require credentials
+    |--------------------------------------------------------------------------
+    |
+    | Without a key or a project id, every translate call returns what Laravel
+    | returns on its own, which is what your tests, CI and a fresh checkout
+    | want. Turn this on where a missing key is a mistake, such as production:
+    | the first request that translates anything then throws the core's
+    | ConfigurationException. Booting never throws, so `config:cache`,
+    | `package:discover` and an image build without secrets still complete.
+    |
+    */
+
+    'require_credentials' => env('LANGSYS_REQUIRE_CREDENTIALS', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Enabled
     |--------------------------------------------------------------------------
     |

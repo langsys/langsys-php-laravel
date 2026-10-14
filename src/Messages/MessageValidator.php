@@ -5,6 +5,7 @@ namespace Langsys\Laravel\Messages;
 use Illuminate\Validation\Validator;
 use Langsys\Laravel\Support\ClientState;
 use Langsys\SDK\Client;
+use Langsys\SDK\Exception\ConfigurationException;
 use Langsys\SDK\Locale\LocaleDetector;
 use Langsys\SDK\Messages\ServerMessage;
 use Throwable;
@@ -71,6 +72,9 @@ final class MessageValidator extends Validator implements HasServerMessages
             foreach ($entries as $entry) {
                 $client->emitMessage($entry);
             }
+        } catch (ConfigurationException $e) {
+            // `require_credentials` asked for a missing key to fail the request, not to degrade it.
+            throw $e;
         } catch (Throwable $e) {
             // A form must never break because this did. Laravel's messages stand either way, since
             // nothing above rewrites them.

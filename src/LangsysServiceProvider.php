@@ -47,6 +47,7 @@ class LangsysServiceProvider extends ServiceProvider
 
             $client = new Client($config['api_key'], $config['project_id'], [
                 'api_url'           => $config['api_url'],
+                'require_credentials' => $config['require_credentials'],
                 // FRM-2: what passes through `__()` registers only through `langsys:sync`.
                 'runtime_registration' => !$config['enabled'],
                 'value_sets'        => $config['enabled'] ? ValueSetDiscovery::classes() : [],
@@ -274,9 +275,9 @@ class LangsysServiceProvider extends ServiceProvider
     }
 
     /**
-     * Only a Client this unit of work actually used: resolving one here would
-     * build it, and without credentials its constructor throws — on every job
-     * and every Octane request of an app that has not configured Langsys.
+     * Only a Client this unit of work actually used: one it never resolved has
+     * nothing queued, and resolving it here would build a client on every job
+     * and every Octane request for nothing.
      *
      * Flush before reset. resetRequestState() drops whatever is still queued —
      * one unit's phrases never ride another's send (REG-8) — so a reset first

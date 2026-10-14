@@ -9,6 +9,7 @@ use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\LocaleFormatter;
 use Langsys\Laravel\Support\RequestLocaleWiring;
 use Langsys\SDK\Client;
+use Langsys\SDK\Exception\ConfigurationException;
 use Langsys\SDK\Locale\LocaleDetector;
 use Langsys\SDK\Locale\RequestLocale;
 use Symfony\Component\HttpFoundation\Cookie;
@@ -40,7 +41,7 @@ class DetectLocale
     /** What each source varies on. The query string is part of the URL, the cache key already. */
     private const VARY = ['query' => null, 'cookie' => 'Cookie', 'session' => 'Cookie', 'header' => 'Accept-Language'];
 
-    /** The container, not the Client: building one without credentials throws, and a request with none is Laravel's. */
+    /** The container, not the Client: an app with no credentials never builds one (`ClientState`), and its request is Laravel's. */
     public function __construct(private readonly Container $app)
     {
     }
@@ -67,6 +68,9 @@ class DetectLocale
 
         try {
             $project = $client->getProject();
+        } catch (ConfigurationException $e) {
+            // `require_credentials` asked for a missing key to fail the request, not to degrade it.
+            throw $e;
         } catch (Throwable) {
             // Nothing can be validated without the project's locales; Laravel's stands, untouched.
             return $next($request);

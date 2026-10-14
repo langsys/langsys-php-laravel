@@ -7,7 +7,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * VAR-2: the shared naming vectors, vendored byte for byte from langsys-js-typescript
- * (tests/fixtures/var-naming-vectors.json, blob a4b61ed2), executed row for row. One case is one
+ * (tests/fixtures/var-naming-vectors.json, blob 0513e1cb), executed row for row. One case is one
  * phrase; collisions resolve within it.
  */
 class PlaceholderNamesTest extends TestCase
@@ -20,6 +20,15 @@ class PlaceholderNamesTest extends TestCase
         foreach ($vectors['cases'] as $case) {
             $this->assertSame($case['names'], PlaceholderNames::names($case['expressions'])['names'], $case['id'] . ': ' . $case['why']);
         }
+    }
+
+    /** An explicit name is never merged: a later value of the same shape is another placeholder. */
+    public function testAnExplicitNameIsItsOwnPlaceholder(): void
+    {
+        $this->assertSame(['total', 'total_2'], PlaceholderNames::names([
+            ['shape' => ['identifier' => 'total'], 'source' => 'total', 'explicit' => 'total'],
+            ['shape' => ['identifier' => 'total'], 'source' => 'total'],
+        ])['names']);
     }
 
     /** Blade's PHP expressions read into the vectors' shapes. */

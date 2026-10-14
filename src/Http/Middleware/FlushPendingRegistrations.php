@@ -23,7 +23,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class FlushPendingRegistrations
 {
-    /** The container, not the Client: a request that built none has nothing queued, and building one without credentials throws. */
+    /** The container, not the Client: a request that built none has nothing queued. */
     public function __construct(private readonly Container $app)
     {
     }

@@ -3,6 +3,7 @@
 namespace Langsys\Laravel\Support;
 
 use Langsys\SDK\Client;
+use Langsys\SDK\Exception\ConfigurationException;
 use Langsys\SDK\Locale\LocaleDetector;
 use Throwable;
 
@@ -34,8 +35,8 @@ class InertiaSsrProps
         // canonicalizes any locale it is handed to.
         $locale = LocaleDetector::normalize($locale ?? app()->getLocale());
 
-        // With no key there is no catalog to seed, and asking for one would build a client the core
-        // refuses to build, reported on every Inertia request rather than once at debug (FRM-3).
+        // With no key there is no catalog to seed. The core's getTranslations() throws without one,
+        // which would be reported on every Inertia request rather than once at debug (FRM-3).
         if (!ClientState::buildable()) {
             return ['langsys' => ['initialTranslations' => null, 'initialTranslationsLocale' => null]];
         }
@@ -45,6 +46,9 @@ class InertiaSsrProps
             // catalog the page was rendered with, answered from the SDK's
             // request-scoped memory rather than fetched again (SRV-4).
             $catalog = app(Client::class)->getTranslations($locale);
+        } catch (ConfigurationException $e) {
+            // `require_credentials` asked for a missing key to fail the request, not to degrade it.
+            throw $e;
         } catch (Throwable $e) {
             // getTranslations() throws on an unreachable API rather than answer
             // with an empty catalog, and this runs on every Inertia request, so

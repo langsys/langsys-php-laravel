@@ -43,7 +43,8 @@ Republish the config (`php artisan vendor:publish --tag=langsys-config --force`)
 
 - **Remove `auto_flush` (`LANGSYS_AUTO_FLUSH`).** Under PHP-FPM it never stopped a flush — the SDK sends its queue at shutdown regardless — and what little is queued at runtime in 2.0 is always sent after the response.
 - **Remove `translate_response.cache` (`LANGSYS_TRANSLATE_RESPONSE_CACHE`, `LANGSYS_TRANSLATE_RESPONSE_CACHE_TTL`).** The page walk no longer caches pages: the SDK caches the catalog, and a cached page carried a stale translation for its TTL and was shared between projects on one store.
-- **New keys**, all optional: `enabled` (`LANGSYS_ENABLED`, the one off switch), `response_kinds`, `value_sets`, `sync_paths`, `snapshot` (`LANGSYS_SNAPSHOT`), and `messages` (the validation-message category, response key and piece names).
+- **New keys**, all optional: `enabled` (`LANGSYS_ENABLED`, the one off switch), `require_credentials` (`LANGSYS_REQUIRE_CREDENTIALS`), `response_kinds`, `value_sets`, `sync_paths`, `snapshot` (`LANGSYS_SNAPSHOT`), and `messages` (the validation-message category, response key and piece names).
+- **A missing key no longer fails.** 1.x threw on the first translation of an app without `LANGSYS_API_KEY` or `LANGSYS_PROJECT_ID`; 2.0 returns what Laravel returns. Where a missing key is a mistake, such as production, set `LANGSYS_REQUIRE_CREDENTIALS=true` to keep the exception: the first use throws the core's `ConfigurationException`, and booting never does.
 
 ### Inertia: the seeded locale is lowercase
 

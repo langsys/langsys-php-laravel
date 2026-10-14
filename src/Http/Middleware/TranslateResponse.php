@@ -34,7 +34,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class TranslateResponse
 {
-    /** The container, not the Client: building one without credentials throws, and a request with none is Laravel's. */
+    /** The container, not the Client: an app with no credentials never builds one (`ClientState`), and its request is Laravel's. */
     public function __construct(private readonly Container $app)
     {
     }

@@ -31,7 +31,9 @@ LANGSYS_API_KEY=a-write-key          # sync registers with it; serve with a read
 LANGSYS_API_URL=http://langsys2.test/api
 ```
 
-**Check:** with the key commented out, every page still renders exactly as plain Laravel, and `storage/logs` has one debug line naming the missing key.
+**Check:**
+- With the key commented out, every page still renders exactly as plain Laravel, and `storage/logs` has one debug line naming the missing key.
+- Add `LANGSYS_REQUIRE_CREDENTIALS=true` as well: `php artisan config:cache` still completes, and the first page that translates anything fails with `API key is required`. Run `php artisan config:clear` afterwards.
 
 ## 2. `langsys:sync`
 

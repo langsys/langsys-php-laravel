@@ -50,7 +50,7 @@ LANGSYS_API_KEY=your-api-key
 LANGSYS_PROJECT_ID=your-project-id
 ```
 
-Installing is enough: `__()` is answered by Langsys from then on. With nothing in the catalog, it returns exactly what Laravel returns on its own — and so it does with no key at all, so your tests, CI and a fresh checkout run without one. `LANGSYS_ENABLED=false` turns the whole package off, for debugging with plain Laravel.
+Installing is enough: `__()` is answered by Langsys from then on. With nothing in the catalog, it returns exactly what Laravel returns on its own — and so it does with no key at all, so your tests, CI and a fresh checkout run without one. Where a missing key is a mistake, such as production, `LANGSYS_REQUIRE_CREDENTIALS=true` makes the first request that translates anything throw instead; booting never does, so `config:cache` and an image build without secrets still complete. `LANGSYS_ENABLED=false` turns the whole package off, for debugging with plain Laravel.
 
 ### API key permissions
 
@@ -230,7 +230,7 @@ Langsys::client()->translatePage($html);       // full-page HTML translation
 
 ## Configuration reference
 
-See [`config/langsys.php`](config/langsys.php): credentials (`LANGSYS_API_KEY`, `LANGSYS_PROJECT_ID`, `LANGSYS_API_URL`), the off switch (`LANGSYS_ENABLED`), response kinds, declared value sets, sync paths, the catalog snapshot, server messages, catalog cache (Laravel store/prefix/TTL), locale-detection sources and persistence, and automatic response translation (`LANGSYS_TRANSLATE_RESPONSE`). `LANGSYS_API_URL` also points the SDK at a local test double; it is read when the client is first resolved, so set it before anything translates.
+See [`config/langsys.php`](config/langsys.php): credentials (`LANGSYS_API_KEY`, `LANGSYS_PROJECT_ID`, `LANGSYS_API_URL`, `LANGSYS_REQUIRE_CREDENTIALS`), the off switch (`LANGSYS_ENABLED`), response kinds, declared value sets, sync paths, the catalog snapshot, server messages, catalog cache (Laravel store/prefix/TTL), locale-detection sources and persistence, and automatic response translation (`LANGSYS_TRANSLATE_RESPONSE`). `LANGSYS_API_URL` also points the SDK at a local test double; it is read when the client is first resolved, so set it before anything translates.
 
 ## Testing your app
 
