@@ -100,6 +100,22 @@ class FallbackAndEscapingTest extends TestCase
         $this->assertSame('Lee hoy nuestros <a href="/terms">términos</a>', Blade::render('@lang(\'Read our <a href="/terms">terms</a> today\')'));
     }
 
+    /**
+     * TOK-1 on a call's line: an element its author excluded is one empty pair in the phrase and
+     * renders from the line, with the call's values filled in, translated or not.
+     */
+    public function testACallsValueInsideAnExcludedElementIsFilled(): void
+    {
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Write to {m0o}{m0c} for help' => 'Escribe a {m0o}{m0c} para ayuda']]);
+        $line = '@t(\'Write to <b translate="no">:email</b> for help\', [\'email\' => \'ana@example.com\'])';
+
+        $this->assertSame('Escribe a <b translate="no">ana@example.com</b> para ayuda', Blade::render($line));
+
+        $this->app->setLocale('en');
+        $this->assertSame('Write to <b translate="no">ana@example.com</b> for help', Blade::render($line), 'A miss prints what plain Laravel prints.');
+        $this->assertSame([], $this->_queued());
+    }
+
     /** A translation can place the source's tags but never add one, change an href or add a token. */
     public function testATranslatorAddedTagIsEscapedAndAnUnknownTokenDropped(): void
     {

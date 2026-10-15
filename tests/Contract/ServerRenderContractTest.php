@@ -32,6 +32,9 @@ class ServerRenderContractTest extends ContractTestCase
         // VAR-5 on the page walk: a Blade sentence with a user's name in it.
         $router->middleware(['web', 'langsys.locale', 'langsys.translate-page', 'langsys.flush'])->get('/walk/greeting', fn () => Blade::render('<html><body><p>Hello {{ $name }}, welcome back</p></body></html>', ['name' => request('name')]));
 
+        // TOK-1 on the page walk: a value Blade prints inside an element its author excluded, in a phrase host.
+        $router->middleware(['web', 'langsys.locale', 'langsys.translate-page', 'langsys.flush'])->get('/walk/excluded', fn () => Blade::render('<html><body><p data-langsys-phrase>Welcome to <b translate="no">{{ $brand }}</b> today</p></body></html>', ['brand' => request('brand')]));
+
         // Renders, then changes the world so the double would now accept this key's write.
         $router->middleware(['web', 'langsys.locale', 'langsys.translate-page', 'langsys.flush'])->get('/walk/drift', function () {
             $this->seedProject(['ipk' => ['type' => 'ip_write', 'ip_allowlist' => ['127.0.0.1']]], $this->_catalog());
@@ -88,6 +91,27 @@ class ServerRenderContractTest extends ContractTestCase
         $phrases = array_column($this->registeredPhrases(), 1);
         $this->assertSame(1, count(array_keys($phrases, 'Hello {name}, welcome back')), 'One phrase for every user.');
         $this->assertSame([], array_values(array_filter($phrases, fn (string $p) => str_contains($p, 'Ana') || str_contains($p, 'Bo,'))));
+    }
+
+    /**
+     * TOK-1 with VAR-5: a value Blade marks inside a `translate="no"` element never enters the
+     * phrase. The page registers one phrase with an empty pair where the element sits and shows the
+     * brand; translated, the element renders from source, so each page shows its own brand.
+     */
+    public function testAValuePrintedInsideAnExcludedElementIsNeverAPhrase(): void
+    {
+        $this->seedProject(['wk' => ['type' => 'write']]);
+        $this->useKey('wk');
+
+        $this->get('/walk/excluded?locale=es-ES&brand=Acme')->assertOk()
+            ->assertSee('<p data-langsys-phrase>Welcome to <b translate="no"><!--ls:brand-->Acme<!--/ls--></b> today</p>', false);
+        $this->assertSame([[null, 'Welcome to {m0o}{m0c} today']], $this->registeredPhrases(), 'One phrase, and the brand is not in it.');
+
+        $this->seedProject(['wk' => ['type' => 'write']], ['phrases' => [['category' => null, 'phrase' => 'Welcome to {m0o}{m0c} today', 'translations' => ['es-es' => 'Bienvenido a {m0o}{m0c} hoy']]]]);
+        $this->useKey('wk');
+
+        $this->get('/walk/excluded?locale=es-ES&brand=Zeta')->assertOk()
+            ->assertSee('<p data-langsys-phrase>Bienvenido a <b translate="no"><!--ls:brand-->Zeta<!--/ls--></b> hoy</p>', false);
     }
 
     /**
