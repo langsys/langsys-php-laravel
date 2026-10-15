@@ -9,7 +9,7 @@ Graded row by row in `CONFORMANCE.md`. The design decisions and deferred work be
 
 ### Release gate — the core is untagged, and the constraint has to move at publication
 
-This branch depends on the 838 `langsys/langsys-php` core (`5859d46`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the rule-object and app-message templates, the offline planner, the server-message API, the snapshot seam, the client without credentials and its `require_credentials` option, an excluded element kept whole inside a phrase, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
+This branch depends on the 838 `langsys/langsys-php` core (`5859d46`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the rule-object and app-message templates, the offline planner, the server-message API, the snapshot seam, the client without credentials and its `require_credentials` option, an excluded element kept whole inside a phrase, a scanner that reads a rich line, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
 
 - **CI fails on this branch by design.** It installs from Packagist. Against v1.3.1, the boundary tests hit an undefined method, and the delegation probes find no fallback where the wrapper used to have one.
 - **At publication**, the constraint moves to the core's 838 tag and the local path repository (below) goes. The operator publishes every SDK at once, after all of them are green.
@@ -62,7 +62,7 @@ Installed, the package answers `__()`, `trans()`, `trans_choice()` and `@lang` (
 
 ### Decided: sync is the only registration
 
-`__()` registers nothing while serving a request (FRM-2); `langsys:sync` registers what the app's code and lang files hold, with the lang files' translations. The page walk (`TranslateResponse`) still collects what it meets after the response. Blade is compiled for scanning by a plain `BladeCompiler`, where `@lang` and `@t` compile to Laravel's own `app('translator')->get()`, the call the core's scanner reads; the rendering compiler writes the escaping call. A compiled hit takes the line of its own call in the view — the n-th call of a function in the compiled view is its n-th in the source — because Blade drops comments and rewrites directives.
+`__()` registers nothing while serving a request (FRM-2); `langsys:sync` registers what the app's code and lang files hold, with the lang files' translations. The page walk (`TranslateResponse`) still collects what it meets after the response. Blade is compiled for scanning by a `BladeCompiler` of its own that takes the app's `@lang` and `@t`, so a line compiles to `app('translator')->getHtml()`, which the core's scanner reads as a rich line and registers in the form the page looks it up by; none of the app's precompilers run, so a scan never logs what rendering would. A compiled hit takes the line of its own call in the view — the n-th call of a function in the compiled view is its n-th in the source — because Blade drops comments and rewrites directives.
 
 ### Decided: a rule object states its template through the core's interface
 

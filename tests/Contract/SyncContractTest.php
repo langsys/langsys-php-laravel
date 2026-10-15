@@ -2,6 +2,7 @@
 
 namespace Langsys\Laravel\Tests\Contract;
 
+use Illuminate\Support\Facades\Log;
 use Langsys\Laravel\Console\SyncCommand;
 
 /**
@@ -25,6 +26,7 @@ class SyncContractTest extends ContractTestCase
     protected function defineRoutes($router): void
     {
         $router->post('/handles', [\Langsys\Laravel\Tests\Fixtures\sync\app\HandleController::class, 'store']);
+        $router->middleware(['web', 'langsys.locale'])->get('/checkout', fn () => view()->file(self::APP . '/views/checkout.blade.php', ['label' => 'Total']));
     }
 
     protected function setUp(): void
@@ -154,10 +156,72 @@ class SyncContractTest extends ContractTestCase
     public function testTheCountsNameWhatTheLangFilesAlreadyTranslate(): void
     {
         $this->artisan('langsys:sync', ['--dry-run' => true])
-            ->expectsOutputToContain('1 phrases already in the catalog, 2 with translations from your lang files,')
+            ->expectsOutputToContain('1 phrases already in the catalog, 3 with translations from your lang files,')
             ->assertExitCode(0);
 
         $this->assertSame([[null, 'Total']], $this->registeredPhrases(), 'A dry run registers nothing.');
+    }
+
+    /**
+     * FRM-8 with FRM-2: a rich `@lang`/`@t` line registers once, in the form the page looks it up
+     * by, so the translation of what sync registered is what the page shows. A copy in raw HTML
+     * would be registered, paid for in every locale, and never read.
+     */
+    public function testARichLineRegistersOnceInTheFormThePageLooksUp(): void
+    {
+        $this->artisan('langsys:sync')->assertExitCode(0);
+
+        $literals = array_filter($this->registeredPhrases(), fn (array $phrase) => $phrase[0] === null);
+        $rich = array_values(array_filter(array_column($literals, 1), fn (string $phrase) => str_contains($phrase, 'terms')));
+        $this->assertSame(['Read our {m0o}terms{m0c} today'], $rich, 'One phrase, tokenized, and no copy in raw HTML.');
+
+        $this->seedProject(['wk' => ['type' => 'write']], [
+            'phrases' => [['category' => null, 'phrase' => $rich[0], 'translations' => ['es-es' => 'Lee hoy nuestros {m0o}términos{m0c}']]],
+        ]);
+        $this->useKey('wk');
+
+        $this->get('/checkout?locale=es-ES')->assertOk()->assertSee('<p>Lee hoy nuestros <a href="/terms">términos</a></p>', false);
+    }
+
+    /**
+     * The same for a key: a base-language line with markup, reached through `@lang`, registers once,
+     * tokenized under its group, with no raw copy from the lang-file pass. Another locale's line is
+     * carried in the same form when its tags line up with the source's, and not at all when they
+     * do not. The page shows the carried translation rebuilt from the source's own elements.
+     */
+    public function testARichKeyLineRegistersTokenizedWithTheTranslationsThatLineUp(): void
+    {
+        $this->artisan('langsys:sync')->assertExitCode(0);
+
+        $legal = array_values(array_filter($this->registeredPhrases(), fn (array $phrase) => $phrase[0] === 'legal'));
+        $this->assertEqualsCanonicalizing([['legal', 'Accept the {m0o}terms{m0c} to continue'], ['legal', 'See our {m0o}policy{m0c}']], $legal);
+
+        $stored = $this->storedTranslations();
+        $this->assertSame(['es-es' => 'Acepta los {m0o}términos{m0c} para continuar'], $stored['legal|Accept the {m0o}terms{m0c} to continue'] ?? null);
+        $this->assertSame([], $stored['legal|See our {m0o}policy{m0c}'] ?? null, 'Tags that do not line up with the source are not carried.');
+
+        $this->useKey('wk');
+        $this->get('/checkout?locale=es-ES')->assertOk()->assertSee('<p>Acepta los <a href="/terms">términos</a> para continuar</p>', false);
+    }
+
+    /**
+     * Sync compiles a view only to read its calls, so none of the app's precompilers run: the value
+     * marker's warning about a value with no name of its own belongs to rendering, not to a scan.
+     * Control: rendering the same view warns.
+     */
+    public function testScanningAViewRunsNoneOfTheAppsPrecompilers(): void
+    {
+        Log::spy();
+
+        $this->artisan('langsys:sync', ['--dry-run' => true])->assertExitCode(0);
+        Log::shouldNotHaveReceived('warning');
+
+        foreach (glob(config('view.compiled') . '/*.php') ?: [] as $compiled) {
+            @unlink($compiled);
+        }
+
+        $this->get('/checkout')->assertOk();
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message) => str_contains($message, '`strlen($label) + 1`'))->once();
     }
 
     public function testASecondSyncRegistersNothingNew(): void

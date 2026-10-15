@@ -4,6 +4,7 @@ namespace Langsys\Laravel\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\View\Compilers\BladeCompiler;
 use Langsys\Laravel\Messages\AppMessageSource;
 use Langsys\Laravel\Messages\FormRequestSource;
@@ -216,14 +217,18 @@ class SyncCommand extends Command
     }
 
     /**
-     * A Blade compiler for reading, not rendering: `@lang` and `@t` compile to Laravel's own
-     * `app('translator')->get(...)`, the call the scanner reads, where the rendering compiler
-     * writes the escaping call instead. Nothing is cached.
+     * A Blade compiler for reading, not rendering: `@lang` and `@t` compile as the app's own
+     * compiler compiles them, a line to `app('translator')->getHtml(...)`, so the core reads it as
+     * the rich line it is and registers it in the form the page looks it up by (FRM-8). Nothing
+     * else of the app's is added, and nothing is cached.
      */
     private static function _scanningCompiler(): BladeCompiler
     {
         $compiler = new BladeCompiler(new Filesystem(), sys_get_temp_dir());
-        $compiler->directive('t', fn (?string $expression) => "<?php echo app('translator')->get($expression); ?>");
+
+        foreach (['lang', 't'] as $directive) {
+            $compiler->directive($directive, Blade::getCustomDirectives()[$directive]);
+        }
 
         return $compiler;
     }
