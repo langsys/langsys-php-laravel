@@ -33,7 +33,7 @@ class InertiaSsrProps
         // One locale form toward every SDK (WIRE-3): the lowercase `xx-yy` the
         // PHP SDK keys its catalog by, which is also what the JS SDK
         // canonicalizes any locale it is handed to.
-        $locale = LocaleDetector::normalize($locale ?? app()->getLocale());
+        $locale = LocaleDetector::normalize(ClientState::locale($locale));
 
         // With no key there is no catalog to seed. The core's getTranslations() throws without one,
         // which would be reported on every Inertia request rather than once at debug (FRM-3).

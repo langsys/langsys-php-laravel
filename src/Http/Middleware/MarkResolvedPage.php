@@ -7,8 +7,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Langsys\Laravel\Http\ResponseKind;
+use Langsys\Laravel\Support\ClientState;
 use Langsys\SDK\Client;
-use Langsys\SDK\Locale\LocaleDetector;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -16,6 +16,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 /**
  * GATE-10's producer for a page Laravel renders (FRM-4): its text was translated by `__()` with no
  * page walk, so its root says so, and a browser SDK on the page never reads that text as source.
+ * It is marked in the locale it was served in, so a locale the project does not serve is its base.
  * When to mark and what to write are the core's (`Client::markResolved()`): a page in the base
  * locale stays source, a root already marked keeps its marker, and nothing else in the page changes.
  *
@@ -35,7 +36,7 @@ class MarkResolvedPage
         $html = $response->getContent();
 
         if (is_string($html) && $html !== '') {
-            $response->setContent(app(Client::class)->markResolved($html, LocaleDetector::normalize(app()->getLocale())));
+            $response->setContent(app(Client::class)->markResolved($html, ClientState::locale()));
         }
 
         return $response;
@@ -45,6 +46,11 @@ class MarkResolvedPage
     {
         if ($response instanceof JsonResponse || $response instanceof RedirectResponse
             || $response instanceof StreamedResponse || $response instanceof BinaryFileResponse) {
+            return false;
+        }
+
+        // A download is no page, whatever type it declares; Symfony fills in `text/html` for none.
+        if (str_contains(strtolower((string) $response->headers->get('Content-Disposition')), 'attachment')) {
             return false;
         }
 

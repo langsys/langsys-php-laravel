@@ -26,7 +26,7 @@ class SyncContractTest extends ContractTestCase
     protected function defineRoutes($router): void
     {
         $router->post('/handles', [\Langsys\Laravel\Tests\Fixtures\sync\app\HandleController::class, 'store']);
-        $router->middleware(['web', 'langsys.locale'])->get('/checkout', fn () => view()->file(self::APP . '/views/checkout.blade.php', ['label' => 'Total']));
+        $router->middleware(['web', 'langsys.locale'])->get('/checkout', fn () => view()->file(self::APP . '/views/checkout.blade.php', ['label' => 'Total', 'count' => 3]));
     }
 
     protected function setUp(): void
@@ -37,7 +37,7 @@ class SyncContractTest extends ContractTestCase
             'phrases' => [['category' => null, 'phrase' => 'Total', 'translations' => ['es-es' => 'Total']]],
         ]);
         $this->useKey('wk');
-        SyncCommand::$watchChecks = null;
+        SyncCommand::$watching = null;
     }
 
     public function testEveryLiteralCallAndBaseLanguageLineIsRegistered(): void
@@ -57,6 +57,12 @@ class SyncContractTest extends ContractTestCase
         }
 
         $this->assertSame(1, count(array_filter($registered, fn ($p) => $p[1] === 'Total')), 'Already in the catalog: not registered again.');
+
+        // MIG-3: a key call registers its line, never the key.
+        $this->assertSame([], array_values(array_filter($registered, fn ($p) => $p[1] === 'messages.welcome')), 'The key is never a phrase.');
+
+        // MSG-7: the validation listing registers its templates under the messages category.
+        $this->assertContains(['Errors', 'Use lowercase letters and dashes only.'], $registered);
     }
 
     /**
@@ -180,7 +186,23 @@ class SyncContractTest extends ContractTestCase
         ]);
         $this->useKey('wk');
 
-        $this->get('/checkout?locale=es-ES')->assertOk()->assertSee('<p>Lee hoy nuestros <a href="/terms">términos</a></p>', false);
+        $this->get('/checkout?locale=es-ES')->assertOk()->assertSee('>Lee hoy nuestros <a href="/terms">términos</a></p>', false);
+    }
+
+    /** `@choice` prints raw too (FRM-8): its plural with markup registers once, tokenized in every branch, and the page shows its translation. */
+    public function testARichPluralRegistersOnceInTheFormThePageLooksUp(): void
+    {
+        $this->artisan('langsys:sync')->assertExitCode(0);
+
+        $plural = array_values(array_filter(array_column($this->registeredPhrases(), 1), fn (string $phrase) => str_contains($phrase, 'left')));
+        $this->assertSame(['{count, plural, one {# {m0o}item{m0c} left} other {# {m1o}items{m1c} left}}'], $plural, 'One phrase, tokenized in every branch, and no copy in raw HTML.');
+
+        $this->seedProject(['wk' => ['type' => 'write']], [
+            'phrases' => [['category' => null, 'phrase' => $plural[0], 'translations' => ['es-es' => '{count, plural, one {Queda # {m0o}artículo{m0c}} other {Quedan # {m1o}artículos{m1c}}}']]],
+        ]);
+        $this->useKey('wk');
+
+        $this->get('/checkout?locale=es-ES')->assertOk()->assertSee('>Quedan 3 <b>artículos</b></p>', false);
     }
 
     /**
@@ -201,15 +223,15 @@ class SyncContractTest extends ContractTestCase
         $this->assertSame([], $stored['legal|See our {m0o}policy{m0c}'] ?? null, 'Tags that do not line up with the source are not carried.');
 
         $this->useKey('wk');
-        $this->get('/checkout?locale=es-ES')->assertOk()->assertSee('<p>Acepta los <a href="/terms">términos</a> para continuar</p>', false);
+        $this->get('/checkout?locale=es-ES')->assertOk()->assertSee('>Acepta los <a href="/terms">términos</a> para continuar</p>', false);
     }
 
     /**
-     * Sync compiles a view only to read its calls, so none of the app's precompilers run: the value
-     * marker's warning about a value with no name of its own belongs to rendering, not to a scan.
-     * Control: rendering the same view warns.
+     * Sync reads a view with the app's own compiler, value marker aside: the marker's warning about
+     * a value with no name of its own belongs to rendering, not to a scan. Control: rendering the
+     * same view warns.
      */
-    public function testScanningAViewRunsNoneOfTheAppsPrecompilers(): void
+    public function testScanningAViewRunsWithoutTheValueMarker(): void
     {
         Log::spy();
 
@@ -224,6 +246,84 @@ class SyncContractTest extends ContractTestCase
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message) => str_contains($message, '`strlen($label) + 1`'))->once();
     }
 
+    /**
+     * A view using components the app registered itself — an alias, a class namespace, an anonymous
+     * path under a prefix, as icon and UI packages register theirs — is read as the app's own
+     * compiler reads it.
+     */
+    public function testAViewUsingTheAppsOwnComponentsIsRead(): void
+    {
+        config()->set('langsys.sync_paths', [self::APP . '-components/views']);
+        // The namespace a real app's composer.json names, which Blade asks before an anonymous
+        // component; this app's path is a fixture directory with none.
+        (fn () => $this->namespace = 'App\\')->call($this->app);
+        \Illuminate\Support\Facades\Blade::component(\Langsys\Laravel\Tests\Fixtures\View\Icon::class, 'icon-user');
+        \Illuminate\Support\Facades\Blade::componentNamespace('Langsys\\Laravel\\Tests\\Fixtures\\View', 'fx');
+        \Illuminate\Support\Facades\Blade::anonymousComponentPath(self::APP . '-components/ui', 'ui');
+        \Illuminate\Support\Facades\View::addLocation(self::APP . '-components');
+        \Illuminate\Support\Facades\Blade::anonymousComponentNamespace('ns-ui', 'chips');
+
+        $this->artisan('langsys:sync')->assertExitCode(0);
+
+        $this->assertContains([null, 'Verified member'], $this->registeredPhrases());
+        $this->assertContains([null, 'Since 2020'], $this->registeredPhrases());
+    }
+
+    /**
+     * The block form, `@lang … @endlang` and `@t … @endt`, is a literal call like `@lang(…)`, read
+     * where Blade reads a directive: its text registers, its values become markers, and the lines
+     * after it keep their place. A block holding an echo, a directive or another block prints text
+     * known only as it renders, and is reported with its line. An `@` inside a word or a comment
+     * is no directive.
+     */
+    public function testTheBlockFormRegistersAsTheCallItPrints(): void
+    {
+        config()->set('langsys.sync_paths', [self::APP . '-blocks/views']);
+
+        $this->artisan('langsys:sync')
+            ->expectsOutputToContain('blocks.blade.php:7: Lang::get() is called with something that is not a literal')
+            ->expectsOutputToContain('blocks.blade.php:12: Lang::get() is called with something that is not a literal')
+            ->expectsOutputToContain('blocks.blade.php:13: Lang::get() is called with something that is not a literal')
+            ->assertExitCode(0);
+
+        $registered = $this->registeredPhrases();
+
+        foreach (['Pay now', 'Thanks for shopping', 'Hello {name}, welcome', 'Place order', 'Write to help@example.com', 'Spaced call', '{item}', 'Last block'] as $phrase) {
+            $this->assertContains([null, $phrase], $registered, $phrase);
+        }
+
+        $this->assertSame([], array_values(array_filter(array_column($registered, 1), fn (string $phrase) => preg_match('/(?<![\w@])@(?:lang|t|if|endif|endlang|endt)\b/', $phrase) === 1)), 'No directive registers as text.');
+        $this->artisan('langsys:sync', ['--dry-run' => true, '--strict' => true])->assertExitCode(1);
+    }
+
+    /**
+     * Views are read as the app's own compiler reads them, value marker aside: a call inside the
+     * app's own directive or inside a package's tag syntax registers like any other.
+     */
+    public function testACallInsideTheAppsOwnBladeSyntaxIsRead(): void
+    {
+        config()->set('langsys.sync_paths', [self::APP . '-syntax/views']);
+        \Illuminate\Support\Facades\Blade::directive('money', fn (string $expression) => "<?php echo e($expression); ?>");
+        \Illuminate\Support\Facades\Blade::precompiler(fn (string $template) => str_replace(['<pkg:title text="', '" />'], ['{{ ', ' }}'], $template));
+
+        $this->artisan('langsys:sync')->assertExitCode(0);
+
+        $this->assertContains([null, 'Total due'], $this->registeredPhrases());
+        $this->assertContains([null, 'Archive this project?'], $this->registeredPhrases());
+    }
+
+    /** A view that cannot compile — a component the app no longer has — is reported, and the rest is read; `--strict` fails. */
+    public function testAViewThatCannotCompileIsReportedAndTheRestRead(): void
+    {
+        config()->set('langsys.sync_paths', [self::APP . '-broken/views']);
+        (fn () => $this->namespace = 'App\\')->call($this->app);
+
+        $this->artisan('langsys:sync')->expectsOutputToContain('broken.blade.php cannot be read:')->assertExitCode(0);
+        $this->assertContains([null, 'Still read'], $this->registeredPhrases());
+
+        $this->artisan('langsys:sync', ['--dry-run' => true, '--strict' => true])->assertExitCode(1);
+    }
+
     public function testASecondSyncRegistersNothingNew(): void
     {
         $this->artisan('langsys:sync')->assertExitCode(0);
@@ -234,17 +334,55 @@ class SyncContractTest extends ContractTestCase
         $this->assertEqualsCanonicalizing($first, $this->registeredPhrases());
     }
 
+    /**
+     * `--watch` waits out its interval between checks, whatever the terminal's input holds, and a
+     * view, a base-language file or the app's validation lines changed while it waits are synced at
+     * the next check: the view's new phrase, the file's new line and the custom message register.
+     */
     public function testWatchSyncsAgainWhenAFileChanges(): void
     {
-        SyncCommand::$watchChecks = 1;
         $view = self::APP . '/views/checkout.blade.php';
-        $original = file_get_contents($view);
+        $lines = self::APP . '/lang/en/messages.php';
+        $validation = self::APP . '/lang/en/validation.php';
+        $originals = [$view => file_get_contents($view), $lines => file_get_contents($lines)];
+        $checked = [];
+        \Illuminate\Support\Facades\Route::post('/newsletter', [\Langsys\Laravel\Tests\Fixtures\SyncWatch\NewsletterController::class, 'store']);
+
+        SyncCommand::$watching = function (int $check) use ($view, $lines, $validation, $originals, &$checked) {
+            $checked[$check] = microtime(true);
+
+            if ($check === 1) {
+                $this->assertNotContains(['messages', 'Watched line'], $this->registeredPhrases(), 'Nothing changed yet: nothing synced again.');
+                file_put_contents($lines, str_replace("];", "    'watched' => 'Watched line',\n];", $originals[$lines]));
+                file_put_contents($validation, "<?php\n\nreturn ['custom' => ['email' => ['required' => 'Tell us your email.']]];\n");
+                touch($lines, time() + 5);
+            }
+
+            // The lang files alone changed: the next check syncs them.
+            if ($check === 2) {
+                $this->assertContains(['messages', 'Watched line'], $this->registeredPhrases(), 'A lang file changed on its own is synced.');
+                file_put_contents($view, $originals[$view] . "<p>{{ __('Watched phrase') }}</p>\n");
+                touch($view, time() + 10);
+            }
+
+            return $check < 3;
+        };
 
         try {
-            touch($view, time() + 5);
-            $this->artisan('langsys:sync', ['--watch' => true, '--interval' => 1])->expectsOutputToContain('Watching for changes')->assertExitCode(0);
+            $this->artisan('langsys:sync', ['--watch' => true, '--interval' => 1])
+                ->expectsOutputToContain('Watching for changes. Press Ctrl+C to stop, and run it again after changing a PHP class or a routes file')
+                ->assertExitCode(0);
         } finally {
-            file_put_contents($view, $original);
+            foreach ($originals as $file => $original) {
+                file_put_contents($file, $original);
+            }
+
+            @unlink($validation);
         }
+
+        $this->assertContains([null, 'Watched phrase'], $this->registeredPhrases());
+        $this->assertContains(['messages', 'Watched line'], $this->registeredPhrases());
+        $this->assertContains(['Errors', 'Tell us your email.'], $this->registeredPhrases());
+        $this->assertGreaterThan(0.9, $checked[2] - $checked[1], 'The interval was waited out between checks.');
     }
 }

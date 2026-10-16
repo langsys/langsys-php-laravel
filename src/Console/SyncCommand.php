@@ -3,9 +3,9 @@
 namespace Langsys\Laravel\Console;
 
 use Illuminate\Console\Command;
-use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\View\Compilers\BladeCompiler;
+use Langsys\Laravel\LangsysTranslator;
 use Langsys\Laravel\Messages\AppMessageSource;
 use Langsys\Laravel\Messages\FormRequestSource;
 use Langsys\Laravel\Support\AppMessageDiscovery;
@@ -23,7 +23,7 @@ use RecursiveIteratorIterator;
 use Throwable;
 
 /**
- * FRM-2, the one way what passes through Laravel's translate function is registered: every literal
+ * FRM-2, how what passes through Laravel's translate function is registered: every literal
  * `__()`, `trans()`, `trans_choice()`, `@lang` and `t()` in the app's PHP and Blade, and every line
  * of its base-language files. A phrase the catalog holds is left alone; one the lang files hold
  * registers with the translations the other locales' files already have; anything else registers
@@ -44,33 +44,66 @@ class SyncCommand extends Command
 
     protected $description = 'Register every phrase the app can show, with the translations its lang files already have';
 
-    /** How many checks `--watch` makes before returning; null watches until stopped. For tests. */
-    public static ?int $watchChecks = null;
+    /**
+     * Told the number of each check `--watch` has made; false stops watching. Null watches until
+     * stopped. For tests.
+     *
+     * @var (\Closure(int): bool)|null
+     */
+    public static ?\Closure $watching = null;
 
     public function handle(): int
     {
+        // Off, the client has no base-language lines, so a plan would hold only part of the app.
+        if (!config('langsys.enabled')) {
+            $this->warn('Langsys is switched off (LANGSYS_ENABLED=false), so langsys:sync reads and registers nothing.');
+
+            return self::SUCCESS;
+        }
+
         $status = $this->_sync();
 
         if (!$this->option('watch')) {
             return $status;
         }
 
-        $this->line('Watching for changes. Press Ctrl+C to stop.');
+        // PHP loads a class once per process and Laravel reads its routes once as it boots, so an
+        // edited class — a form request's rules, an app message, a value set — or a routes file is
+        // read by the next run, not the next check.
+        $this->line('Watching for changes. Press Ctrl+C to stop, and run it again after changing a PHP class or a routes file: each is read once per run.');
         $seen = $this->_fingerprint();
 
-        for ($checks = 0; self::$watchChecks === null || $checks < self::$watchChecks; $checks++) {
-            // Waits for the interval, or for input, whichever comes first: no timer of its own.
-            $input = [STDIN];
+        // The interval is a developer command's poll, not a network timer, and the binding keeps no
+        // timer of its own (BIND-3): it is waited out as the timeout of a select on a stream nothing
+        // writes to, so nothing the terminal holds cuts it short.
+        $quiet = stream_socket_pair(DIRECTORY_SEPARATOR === '\\' ? STREAM_PF_INET : STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+
+        for ($check = 1; ; $check++) {
+            $wait = [$quiet[0]];
             $none = null;
-            @stream_select($input, $none, $none, max(1, (int) $this->option('interval')));
+            @stream_select($wait, $none, $none, max(1, (int) $this->option('interval')));
 
             if (($now = $this->_fingerprint()) !== $seen) {
                 $seen = $now;
+
+                // The client reads the base-language files once, as it is built, and Laravel's
+                // translator keeps every line it has loaded, the validator's included, so each sync
+                // after a change reads them again: with a client built afresh from the binding that
+                // built the first, and the translator's lines dropped.
+                if (array_key_exists(Client::class, $this->laravel->getBindings())) {
+                    $this->laravel->forgetInstance(Client::class);
+                    $this->laravel->forgetInstance(LangsysTranslator::class);
+                }
+
+                $this->laravel['translator']->setLoaded([]);
+
                 $status = $this->_sync();
             }
-        }
 
-        return $status;
+            if (self::$watching !== null && !(self::$watching)($check)) {
+                return $status;
+            }
+        }
     }
 
     private function _sync(): int
@@ -86,7 +119,7 @@ class SyncCommand extends Command
             return self::FAILURE;
         }
 
-        [$hits, $files] = $this->_hits();
+        [$hits, $files, $unreadable] = $this->_hits();
         $messages = MessageCatalogCommand::collect([FormRequestSource::fromRoutes($this->laravel['router']), AppMessageSource::discovered()]);
 
         // FRM-2, MSG-7: a call the messages listing already owns — inside an app message's
@@ -113,6 +146,10 @@ class SyncCommand extends Command
 
         $this->_report($plan, $files, count($messages->templates()));
 
+        foreach ($unreadable as $view) {
+            $this->error('✗ ' . $view);
+        }
+
         // Validation messages: problems fail `--strict`, advice (MSG-10) never does.
         foreach ($messages->problems() as $problem) {
             $this->error('✗ ' . $problem);
@@ -122,7 +159,7 @@ class SyncCommand extends Command
             $this->line('  · ' . $advice);
         }
 
-        $strict = $this->option('strict') && ($plan->failsStrict() || $messages->hasProblems());
+        $strict = $this->option('strict') && ($plan->failsStrict() || $messages->hasProblems() || $unreadable !== []);
 
         if ($this->option('dry-run')) {
             return $strict ? self::FAILURE : self::SUCCESS;
@@ -190,7 +227,7 @@ class SyncCommand extends Command
      * compiler, so `@lang`, `{{ __() }}` and `@choice` are read as Laravel runs them, and each hit's
      * line is found again in the view it came from.
      *
-     * @return array{0: list<array>, 1: int}
+     * @return array{0: list<array>, 1: int, 2: list<string>}
      */
     private function _hits(): array
     {
@@ -198,6 +235,7 @@ class SyncCommand extends Command
         $compiler = self::_scanningCompiler();
         $hits = [];
         $files = 0;
+        $unreadable = [];
 
         foreach ($this->_files() as $path) {
             $files++;
@@ -210,27 +248,88 @@ class SyncCommand extends Command
                 continue;
             }
 
-            array_push($hits, ...self::_sourceLines($source, $scanner->scan($compiler->compileString($source), $label)));
+            // A view Blade cannot compile — a component the app no longer has — is reported, and
+            // the rest are read; the app never compiles a view it never renders.
+            try {
+                $compiled = self::_blocks($compiler->compileString($source));
+            } catch (Throwable $e) {
+                $unreadable[] = "$label cannot be read: " . $e->getMessage();
+
+                continue;
+            }
+
+            array_push($hits, ...self::_sourceLines($source, $scanner->scan($compiled, $label)));
         }
 
-        return [$hits, $files];
+        return [$hits, $files, $unreadable];
     }
 
     /**
-     * A Blade compiler for reading, not rendering: `@lang` and `@t` compile as the app's own
-     * compiler compiles them, a line to `app('translator')->getHtml(...)`, so the core reads it as
-     * the rich line it is and registers it in the form the page looks it up by (FRM-8). Nothing
-     * else of the app's is added, and nothing is cached.
+     * The app's own Blade compiler, for reading, not rendering: every directive, component and
+     * precompiler the app and its packages registered reads a view as the page does, so a call
+     * inside them is read too, and `@lang`, `@t` and `@choice` compile as the page compiles them,
+     * a line to `app('translator')->getHtml(...)` or `choiceHtml(...)`, which the core reads as the
+     * rich line it is (FRM-8). The value marker is this package's and rendering's, so a scan runs
+     * without it and logs nothing rendering would. The block form is marked where Blade itself
+     * finds the directive, for `_blocks()` to read. Nothing is cached.
      */
     private static function _scanningCompiler(): BladeCompiler
     {
-        $compiler = new BladeCompiler(new Filesystem(), sys_get_temp_dir());
+        $compiler = clone Blade::getFacadeRoot();
+
+        (function () {
+            $this->precompilers = array_values(array_filter($this->precompilers, fn (callable $precompiler) => !$precompiler instanceof \Closure
+                || (new \ReflectionFunction($precompiler))->getClosureScopeClass()?->getName() !== \Langsys\Laravel\LangsysServiceProvider::class));
+        })->call($compiler);
+
+        $inline = $compiler->getCustomDirectives()['lang'];
 
         foreach (['lang', 't'] as $directive) {
-            $compiler->directive($directive, Blade::getCustomDirectives()[$directive]);
+            $compiler->directive($directive, function (?string $expression) use ($inline) {
+                $expression = trim((string) $expression);
+
+                return $expression === '' || str_starts_with($expression, '[')
+                    ? '<?php /*' . self::BLOCK . base64_encode($expression === '' ? '[]' : $expression) . '*/ ?>'
+                    : $inline($expression);
+            });
+            $compiler->directive("end$directive", fn () => self::BLOCK_END);
         }
 
         return $compiler;
+    }
+
+    /**
+     * Each block, `@lang … @endlang` or `@t … @endt`, as the call it prints: `getHtml('text',
+     * values)`, its text trimmed as Laravel trims it, so the scan reads a literal line as any
+     * other. A block holding PHP — an echo, a directive, another block — prints text known only as
+     * it renders, so it is read as a call with something that is not a literal, which `--strict`
+     * reports, and what it holds is read after it. Innermost blocks first, so a block inside
+     * another is read on its own.
+     */
+    private static function _blocks(string $compiled): string
+    {
+        $open = '<?php /*' . self::BLOCK;
+
+        while (($end = strpos($compiled, self::BLOCK_END)) !== false) {
+            $start = strrpos(substr($compiled, 0, $end), $open);
+
+            if ($start === false) {
+                $compiled = substr_replace($compiled, '', $end, strlen(self::BLOCK_END));
+
+                continue;
+            }
+
+            $body = strpos($compiled, '*/ ?>', $start) + 5;
+            $values = base64_decode(substr($compiled, $start + strlen($open), $body - 5 - $start - strlen($open)));
+            $text = substr($compiled, $body, $end - $body);
+            // A block holding PHP keeps it after its own call, for the calls inside to be read too.
+            $call = str_contains($text, '<?')
+                ? "<?php echo app('translator')->getHtml(\$__lsBlockText); ?>" . $text
+                : "<?php echo app('translator')->getHtml(" . var_export(trim($text), true) . ", $values); ?>";
+            $compiled = substr($compiled, 0, $start) . $call . substr($compiled, $end + strlen(self::BLOCK_END));
+        }
+
+        return $compiled;
     }
 
     /** @return list<string> */
@@ -278,11 +377,9 @@ class SyncCommand extends Command
     }
 
     /** The base-language files, as the provider hands them to the client. */
-    private function _migration(): ?array
+    private function _migration(): array
     {
-        return config('langsys.enabled')
-            ? MigrationFiles::for($this->laravel['translation.loader'], $this->laravel->langPath(), $this->laravel['config']['app.fallback_locale'])
-            : null;
+        return MigrationFiles::for($this->laravel['translation.loader'], $this->laravel->langPath(), $this->laravel['config']['app.fallback_locale']);
     }
 
     /**
@@ -300,14 +397,21 @@ class SyncCommand extends Command
         return is_file($this->laravel->langPath("$locale/validation.php")) || is_file($framework) ? ['validation'] : [];
     }
 
-    /** How each entry point is written in a Blade view, for finding a compiled hit's call again. */
+    /** What marks a block's start and end in a view compiled for reading. */
+    private const BLOCK = 'ls-block:';
+    private const BLOCK_END = '<?php /*/ls-block*/ ?>';
+
+    /**
+     * How each entry point is written in a Blade view, for finding a compiled hit's call again:
+     * every `@lang` and `@t` is one call, written inline or opening a block.
+     */
     private const BLADE_CALLS = [
         '__'           => '/(?<![\w$>:@])__\s*\(/',
         'trans'        => '/(?<![\w$>:@])trans\s*\(/',
         'trans_choice' => '/(?<![\w$>:@])trans_choice\s*\(/',
         't'            => '/(?<![\w$>:@])t\s*\(/',
-        'Lang::get'    => '/@lang\s*\(|@t\s*\(|Lang::get\s*\(/',
-        'Lang::choice' => '/@choice\s*\(|Lang::choice\s*\(/',
+        'Lang::get'    => '/(?<![\w@])@(?:lang|t)\b|Lang::get\s*\(/',
+        'Lang::choice' => '/(?<![\w@])@choice\s*\(|Lang::choice\s*\(/',
     ];
 
     /**
@@ -321,10 +425,12 @@ class SyncCommand extends Command
     private static function _sourceLines(string $source, array $hits): array
     {
         $calls = [];
+        // Blade drops its comments, so a call written in one is none: each is blanked, its lines kept.
+        $read = preg_replace_callback('/\{\{--.*?--\}\}/s', fn (array $comment) => str_repeat("\n", substr_count($comment[0], "\n")), $source);
 
         foreach (self::BLADE_CALLS as $entryPoint => $pattern) {
-            preg_match_all($pattern, $source, $found, PREG_OFFSET_CAPTURE);
-            $calls[$entryPoint] = array_map(fn (array $match) => substr_count($source, "\n", 0, $match[1]) + 1, $found[0]);
+            preg_match_all($pattern, $read, $found, PREG_OFFSET_CAPTURE);
+            $calls[$entryPoint] = array_map(fn (array $match) => substr_count($read, "\n", 0, $match[1]) + 1, $found[0]);
         }
 
         $seen = [];
@@ -348,7 +454,16 @@ class SyncCommand extends Command
     {
         $stamp = '';
 
-        foreach ([...$this->_files(), ...glob($this->laravel->langPath() . '/{*,*/*,vendor/*/*/*}.{php,json}', GLOB_BRACE) ?: []] as $file) {
+        // One pattern per depth and extension: GLOB_BRACE is not defined where PHP is built on musl.
+        $lang = [];
+
+        foreach (['/*', '/*/*', '/vendor/*/*/*'] as $depth) {
+            foreach (['.php', '.json'] as $extension) {
+                array_push($lang, ...(glob($this->laravel->langPath() . $depth . $extension) ?: []));
+            }
+        }
+
+        foreach ([...$this->_files(), ...$lang] as $file) {
             $stamp .= $file . ':' . filemtime($file) . ';';
         }
 

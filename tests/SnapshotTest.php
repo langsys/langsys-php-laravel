@@ -33,6 +33,11 @@ class SnapshotTest extends TestCase
         parent::tearDown();
     }
 
+    protected function defineRoutes($router): void
+    {
+        $router->middleware(['web', 'langsys.locale'])->get('/save', fn () => response()->json(['locale' => app()->getLocale(), 'text' => __('Save')]));
+    }
+
     /** A snapshot as the core exports it: its members and their checksum. */
     private static function _snapshot(array $catalog): string
     {
@@ -54,6 +59,19 @@ class SnapshotTest extends TestCase
         config()->set('langsys.snapshot', $this->path);
 
         $this->assertSame('Guardar', t('Save', [], 'es-ES'));
+    }
+
+    /**
+     * SRV-6 offline: with authorization unreachable, the snapshot's base and locales are the
+     * locales served, so a request for one it holds is served in it, and one it lacks falls
+     * through to its base.
+     */
+    public function testOfflineTheSnapshotsLocalesAreServed(): void
+    {
+        config()->set('langsys.snapshot', $this->path);
+
+        $this->getJson('/save?locale=es-ES')->assertJson(['locale' => 'es-ES', 'text' => 'Guardar']);
+        $this->getJson('/save?locale=fr-FR')->assertJson(['locale' => 'en', 'text' => 'Save']);
     }
 
     /** Control: without the setting, the same lookup offline renders the source phrase. */

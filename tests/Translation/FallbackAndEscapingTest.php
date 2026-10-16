@@ -57,6 +57,22 @@ class FallbackAndEscapingTest extends TestCase
         $this->assertSame('Bienvenido de nuevo, Ana', __('messages.welcome', ['name' => 'Ana']));
         $this->assertSame('Hola Ana', __('Hello :name', ['name' => 'Ana']), 'A JSON line, keyed by the sentence as written.');
         $this->assertSame('3 manzanas', trans_choice('messages.apples', 3), "A plural line, read as Laravel's plural.");
+        $this->assertSame('Bienvenido de nuevo, Ana', __('messages.welcome', ['name' => 'Ana'], ''), 'An empty locale is the current one, for the lang files too.');
+    }
+
+    /**
+     * FRM-1, FRM-3: the lang files answer as Laravel reads them, for the locale exactly as set: an
+     * `es-MX` request reads no `es` file, and an `es_ES` one no `es-ES` file, so with nothing in the
+     * catalog each prints what Laravel prints, the source.
+     */
+    public function testTheLangFilesAreReadForTheLocaleExactlyAsSet(): void
+    {
+        foreach (['es-MX', 'es_ES'] as $locale) {
+            $this->app->setLocale($locale);
+
+            $this->assertSame('Welcome back, Ana', __('messages.welcome', ['name' => 'Ana']), $locale);
+            $this->assertSame('Hello Ana', __('Hello :name', ['name' => 'Ana']), $locale);
+        }
     }
 
     public function testWithNeitherTheSourceIsReturnedFilled(): void
@@ -85,6 +101,16 @@ class FallbackAndEscapingTest extends TestCase
             $this->assertStringNotContainsString('<script>', $html, $directive);
             $this->assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;Pagar', $html, $directive);
         }
+    }
+
+    /** `@choice` prints raw as `@lang` does, so catalog text is escaped there too; the app's own plural line prints as Laravel prints it. */
+    public function testCatalogMarkupIsEscapedThroughChoice(): void
+    {
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Pay now' => '<script>alert(1)</script>Pagar']]);
+
+        $this->assertSame('&lt;script&gt;alert(1)&lt;/script&gt;Pagar', Blade::render("@choice('Pay now', 2)"));
+        $this->assertSame('3 manzanas', Blade::render("@choice('messages.apples', 3)"));
+        $this->assertSame('3 manzanas', Blade::render("@choice('messages.apples', \$items)", ['items' => collect([1, 2, 3])]), 'A countable is counted, as Laravel counts it.');
     }
 
     public function testTheAppsOwnLangFileMarkupPrintsAsLaravelPrintsIt(): void
@@ -130,9 +156,22 @@ class FallbackAndEscapingTest extends TestCase
         $this->assertStringNotContainsString('m7o', $html);
     }
 
-    public function testTheBlockFormStaysLaravels(): void
+    /**
+     * The block form, `@lang … @endlang` and its alias `@t … @endt`, prints as `@lang(…)` does:
+     * catalog text escaped, the app's own line raw, its values filled.
+     */
+    public function testTheBlockFormEscapesCatalogTextToo(): void
     {
-        $this->assertSame('Goodbye', trim(Blade::render('@lang messages.farewell @endlang')));
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Pay now' => '<script>alert(1)</script>Pagar']]);
+
+        foreach (['@lang Pay now @endlang', '@t Pay now @endt'] as $template) {
+            $this->assertSame('&lt;script&gt;alert(1)&lt;/script&gt;Pagar', trim(Blade::render($template)), $template);
+        }
+
+        $this->assertSame('Lee los <a href="/terminos">términos</a>', trim(Blade::render('@lang Terms @endlang')));
+        $this->assertSame('Hola Ana', trim(Blade::render("@lang(['name' => 'Ana']) Hello :name @endlang")));
+        $this->assertSame('Goodbye', trim(Blade::render('@lang messages.farewell @endlang')), 'A line no file translates is its source.');
+        $this->assertSame('Pick tea for Ana', trim(Blade::render("@lang(['name' => 'Ana']) Pick @lang(['item' => 'tea']) :item @endlang for :name @endlang")), 'Blocks nest, each with its own values.');
     }
 
     /** `{!! __() !!}` stays the developer's explicit raw choice. */

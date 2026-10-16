@@ -4,10 +4,11 @@ namespace Langsys\Laravel\Support;
 
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use Throwable;
 
 /**
  * The classes a directory declares, found the way Laravel finds its own event listeners: each PHP
- * file's tokens name the class, interface or enum it declares, so no path layout is assumed. What
+ * file's tokens name the class or enum it declares, so no path layout is assumed. What
  * counts is the caller's: FRM-7's value sets and MSG-7's app messages each pass their own test.
  *
  * @internal
@@ -31,7 +32,15 @@ final class ClassDiscovery
                 continue;
             }
 
-            if ($accepts($class)) {
+            // Asking loads the class. One that cannot load here — a dev-only package's provider in
+            // an install without dev dependencies — declares nothing this process can use.
+            try {
+                $accepted = $accepts($class);
+            } catch (Throwable) {
+                $accepted = false;
+            }
+
+            if ($accepted) {
                 $classes[] = $class;
             }
         }
@@ -41,7 +50,7 @@ final class ClassDiscovery
         return $classes;
     }
 
-    /** The class, interface or enum a file declares, read from its tokens. */
+    /** The class or enum a file declares, read from its tokens. */
     private static function _declaredClass(string $code): ?string
     {
         $tokens = token_get_all($code);

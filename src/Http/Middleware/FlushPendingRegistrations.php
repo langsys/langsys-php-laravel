@@ -36,7 +36,8 @@ class FlushPendingRegistrations
     /** Runs once the response has been sent, so registration never spends the visitor's latency (SRV-3). */
     public function terminate(Request $request, Response $response): void
     {
-        if ($this->app->resolved(Client::class)) {
+        // Switched off, the request is Laravel's and nothing of this package's is sent.
+        if ($this->app->resolved(Client::class) && $this->app['config']->get('langsys.enabled')) {
             $this->app->make(Client::class)->flushPendingRegistrations();
         }
     }

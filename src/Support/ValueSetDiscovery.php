@@ -12,7 +12,8 @@ use Langsys\SDK\Messages\ValueSets;
  * a declared placeholder for (`#[TranslatesAs]`). `langsys.value_sets` adds classes kept elsewhere.
  *
  * Scanning loads every class it finds, so a production app caches the list, as `event:cache`
- * does: `php artisan langsys:cache` writes it to `bootstrap/cache`, and `optimize` runs it.
+ * does: `php artisan langsys:cache` writes it to `bootstrap/cache`, and on Laravel 11.27 and later
+ * `optimize` runs it.
  */
 final class ValueSetDiscovery
 {

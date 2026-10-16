@@ -25,6 +25,11 @@ class MigrateModeTest extends TestCase
         parent::defineEnvironment($app);
     }
 
+    protected function defineRoutes($router): void
+    {
+        $router->middleware('api')->post('/api/cards', fn () => request()->validate(['cc_number' => 'required'], [], ['cc_number' => 'card number']));
+    }
+
     private function _failing(): LaravelValidator
     {
         $validator = Validator::make([], ['cc_number' => 'required'], [], ['cc_number' => 'card number']);
@@ -66,21 +71,24 @@ class MigrateModeTest extends TestCase
         $this->assertSame('cc_number', $entries[0]->getField());
     }
 
-    /** MSG-8: a template the catalog does not list is queued, and sent after the response. */
-    /** FRM-2: a failed validation registers nothing at runtime; `langsys:sync` registers templates. */
+    /**
+     * FRM-2: a failed validation registers nothing at runtime, nor does the JSON response that
+     * carries its entries; `langsys:sync` registers templates.
+     */
     public function testAFailureRegistersNothingAtRuntime(): void
     {
-        config()->set('langsys.api_url', self::UNREACHABLE_API);
-        $this->app->forgetInstance(Client::class);
-        $this->seedCatalog('es-es', ['Errors' => ['Another sentence.' => 'Otra frase.']]);
+        // As the provider builds it (`runtime_registration` off), for a project that serves Spanish.
+        $client = $this->offlineClient(['es-es' => ['Errors' => ['Another sentence.' => 'Otra frase.']]], ['runtime_registration' => false]);
+        $client->serveProject(['base_locale' => 'en-us', 'target_locales' => ['es-es']]);
+        $this->app->instance(Client::class, $client);
         $this->app->setLocale('es-ES');
 
         $this->_failing();
+        $this->postJson('/api/cards', [], ['Accept-Language' => 'es'])->assertStatus(422)->assertHeader('Content-Language', 'es-es');
 
-        $this->assertSame([], $this->app->make(Client::class)->getPendingPhrases());
+        $this->assertSame([], $client->getPendingPhrases());
     }
 
-    /** MSG-6: registration uses the configured category, on the client the provider builds. */
     /** MSG-6: the configured category is the core's messages category, where templates are looked up and synced. */
     public function testTheConfiguredCategoryIsTheCoresMessagesCategory(): void
     {

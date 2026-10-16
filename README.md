@@ -18,14 +18,14 @@ Integrate the Langsys Translation Manager into your Laravel application — Blad
 - **PHP 8.1+**, **Laravel 10, 11, or 12**
 - **`ext-intl`** (required — ICU plural rules and locale-aware number/date formatting). Note that the official `php:8.x-fpm` Docker images do not bundle it; add `docker-php-ext-install intl`.
 
-> **On Laravel 10 and 11:** both lines are past Laravel's security-support window and carry unpatched advisories, so **Composer 2.9+ refuses to lock any release in them by default.** This package supports and tests both — CI runs the full suite against Laravel 10, 11 and 12 on every push — and adding it to an *existing* 10.x/11.x app works normally, because Composer blocks *locking* an advisory-flagged version, not *having* one. What it blocks is resolving the framework afresh: a new Laravel 10/11 project, or `composer update laravel/framework` within those lines. That's Laravel's advisory status rather than anything about this package, and if you hit it, `composer config audit.block-insecure false` is the (deliberate, project-wide) opt-out.
+> **On Laravel 10 and 11:** both lines are past Laravel's security-support window and carry unpatched advisories, so **Composer 2.9+ refuses to lock any release in them by default.** This package supports and tests both — CI runs the full suite against Laravel 10, 11 and 12 on every pull request and every push to `main` — and adding it to an *existing* 10.x/11.x app works normally, because Composer blocks *locking* an advisory-flagged version, not *having* one. What it blocks is resolving the framework afresh: a new Laravel 10/11 project, or `composer update laravel/framework` within those lines. That's Laravel's advisory status rather than anything about this package, and if you hit it, `composer config audit.block-insecure false` is the (deliberate, project-wide) opt-out.
 
 ## How it's layered
 
 `langsys/langsys-php-laravel` is a Laravel wrapper over the dependency-free [`langsys/langsys-php`](https://github.com/langsys/langsys-php), which owns the HTTP client, phrase lookup, **placeholder interpolation**, the source scanner, sync planning and catalog caching. This package adds only the Laravel-native concerns:
 
 - **Laravel's own translate function, answered by Langsys.** `__()`, `trans()`, `trans_choice()` and `@lang` keep their calling convention and return the catalog's translation, then your lang files' translation, then the source. `t()` and `@t` are the same functions under shorter names.
-- **`php artisan langsys:sync`** registers every phrase your PHP and Blade can show, and every line of your base-language files, with the translations your other lang files already have. Nothing registers while serving a request.
+- **`php artisan langsys:sync`** registers every phrase your PHP and Blade can show, and every line of your base-language files, with the translations your other lang files already have. Serving a request registers nothing through `__()`, apart from a sentence built from a declared value your last sync did not see; the opt-in page walk registers what it meets, after the response.
 - A **service provider** that builds the SDK `Client` from `config/langsys.php` and routes catalog caching through **Laravel's cache** (any store — redis, memcached, file, array).
 - A **`DetectLocale` middleware** resolving the request locale (query → cookie → session → `Accept-Language`) when your app has not set one.
 - **Validation messages** built from the rule that failed, carried beside Laravel's own error body for a client SDK to render — see [`docs/server-messages.md`](docs/server-messages.md).
@@ -41,6 +41,7 @@ Trying an unreleased branch against your own checkouts? [`docs/local-testing.md`
 ```bash
 composer require langsys/langsys-php-laravel
 php artisan vendor:publish --tag=langsys-config
+php artisan view:clear   # views compiled before installing print @lang as Laravel's own
 ```
 
 Set your credentials in `.env`:
@@ -50,7 +51,7 @@ LANGSYS_API_KEY=your-api-key
 LANGSYS_PROJECT_ID=your-project-id
 ```
 
-Installing is enough: `__()` is answered by Langsys from then on. With nothing in the catalog, it returns exactly what Laravel returns on its own — and so it does with no key at all, so your tests, CI and a fresh checkout run without one. Where a missing key is a mistake, such as production, `LANGSYS_REQUIRE_CREDENTIALS=true` makes the first request that translates anything throw instead; booting never does, so `config:cache` and an image build without secrets still complete. `LANGSYS_ENABLED=false` turns the whole package off, for debugging with plain Laravel.
+Installing is enough: `__()` is answered by Langsys from then on. With nothing in the catalog, it returns exactly what Laravel returns on its own — and so it does with no key at all, so your tests, CI and a fresh checkout run without one. Where a missing key is a mistake, such as production, `LANGSYS_REQUIRE_CREDENTIALS=true` makes the first request that translates anything throw instead; booting never does, so `config:cache` and an image build without secrets still complete. `LANGSYS_ENABLED=false` switches it off, for debugging: Laravel answers every request as it would without this package, with its own translator and validator, and the package's middleware on your routes does nothing. Views compiled before or after the switch flips render either way.
 
 ### API key permissions
 
@@ -91,7 +92,7 @@ $title = __('Order confirmed');
 
 The lookup order is the catalog, then your lang file for the locale being rendered, then the source, filled. `t()` and `@t` take the same arguments and give the same answer.
 
-**Escaping.** `@lang` and `@t` escape catalog text: a translation can place the source line's own elements — `Read the <a href="/docs">docs</a>` keeps its link — but never add a tag or a script. A line from your own lang files prints as Laravel prints it. `{{ __() }}` escapes everything, and `{!! __() !!}` stays your raw choice.
+**Escaping.** `@lang`, `@t` and `@choice` escape catalog text, in their block form (`@lang … @endlang`) too: a translation can place the source line's own elements — `Read the <a href="/docs">docs</a>` keeps its link — but never add a tag or a script. A line from your own lang files prints as Laravel prints it. `{{ __() }}` escapes everything, and `{!! __() !!}` stays your raw choice.
 
 #### Interpolation & pluralization
 
@@ -118,18 +119,18 @@ A key's group is its category: `menu.home` and `repairs.home` are two catalog en
 php artisan langsys:sync            # register
 php artisan langsys:sync --dry-run  # list, register nothing
 php artisan langsys:sync --strict   # also fail on anything it could not register (CI)
-php artisan langsys:sync --watch    # sync again on every change (development)
+php artisan langsys:sync --watch    # sync again on every change (development; rerun after editing a class or routes)
 ```
 
-It reads every literal `__()`, `trans()`, `trans_choice()`, `@lang` and `t()` in `app/`, `routes/` and `resources/views/` (`langsys.sync_paths` replaces them), and every line of your base-language files. A phrase already in the catalog is left alone; one your lang files translate is registered with those translations, so work already done is kept; anything else is registered alone. A line with inline markup that `@lang` or `@t` prints registers once, as the page looks it up (`Read our {m0o}terms{m0c} today`), and another locale's line comes with it only when its tags line up with the source's. A call whose argument is not a literal is reported with its file and line, unless it only builds a key inside a literal group — `__("messages.$key")` — whose lines are all registered anyway. Every validation message your routes can send is registered beside them, each with its field's label written in — which is why a line holding `:attribute` never registers on its own. A rule object of your own states its sentence through `Langsys\SDK\Messages\HasMessageTemplate` (see [`docs/server-messages.md`](docs/server-messages.md)).
+It reads every literal `__()`, `trans()`, `trans_choice()`, `@lang` and `t()` in `app/`, `routes/` and `resources/views/` (`langsys.sync_paths` replaces them), and every line of your base-language files. A phrase already in the catalog is left alone; one your lang files translate is registered with those translations, so work already done is kept; anything else is registered alone. A line with inline markup that `@lang`, `@t` or `@choice` prints registers once, as the page looks it up (`Read our {m0o}terms{m0c} today`), and another locale's line comes with it only when its tags line up with the source's. A call whose argument is not a literal is reported with its file and line, unless it only builds a key inside a literal group — `__("messages.$key")` — whose lines are all registered anyway. Every validation message your routes can send is registered beside them, each with its field's label written in — which is why a line holding `:attribute` never registers on its own. A rule object of your own states its sentence through `Langsys\SDK\Messages\HasMessageTemplate` (see [`docs/server-messages.md`](docs/server-messages.md)).
 
 ### Locale detection
 
-`DetectLocale` tries the configured sources in order (`query`, `cookie`, `session`, `header` by default), canonicalizes the winner to BCP 47, and sets it on both the Laravel app and the Langsys client. `Accept-Language` parsing is delegated to the SDK's `LocaleDetector::fromAcceptLanguage()`, so it honours `q`-value priority (`en,es-MX;q=0.9` resolves to `en`), rejects `q=0` as "not acceptable" per RFC 7231, and fills a missing region (`en` → `en-EN`), since the Langsys API addresses translations by `xx-yy` codes. An explicit `?locale=es-ES` choice persists via cookie (or session — see `config/langsys.php`). The locale cookie is exempted from cookie encryption so client-side JS can share the preference.
+Where your app has already set the locale this request — its own middleware, a route, a user preference — `DetectLocale` keeps it and serves it in your project's form: `es-ES` is `es-es`, a bare `es` is your project's default Spanish, and a locale your project does not serve is served as its base locale, while your own lang files for it still answer what the catalog lacks. Where nothing has set it, `DetectLocale` tries the configured sources in order (`query`, `cookie`, `session`, `header` by default), takes the first candidate your project serves (`supported` narrows that list), sets it on Laravel as your own `lang/` directory spells it (`es` for `lang/es`), else as canonical BCP 47 (`es-ES`), and adds the `Vary` the choice depended on. `Accept-Language` is negotiated by the core against your project's locales, honouring `q` values; `q=0` means not acceptable. With the API unreachable, a configured snapshot's locales are served; without one, Laravel's locale stands. An explicit `?locale=es-ES` choice persists via cookie (or session — see `config/langsys.php`); the cookie holds the plain locale code and is not encrypted.
 
 ### What the response gets
 
-What `__()` returns depends on who reads the response next. A page the server renders gets the translation, and its root is marked resolved so a browser SDK does not translate it again. Values Blade prints in text are marked as placeholders — `<p>Hello {{ $user->name }}</p>` is the one phrase `Hello {name}` for every user — so a browser SDK or the page walk never registers a sentence per user. An Inertia page — Inertia's middleware on the route, or an Inertia visit — gets the source, because its own browser SDK translates it. A notification is translated in the recipient's `preferredLocale()`, from a queued job too, and mail sent while serving an Inertia page is translated rather than handed the page's source text. `langsys.response_kinds` decides it yourself for a route group: `auto`, `server` or `client`.
+What `__()` returns depends on who reads the response next. A page the server renders gets the translation, and its root is marked resolved so a browser SDK does not translate it again. Values Blade prints in text are marked as placeholders — `<p>Hello {{ $user->name }}</p>` is the one phrase `Hello {name}` for every user — so a browser SDK or the page walk never registers a sentence per user. A value counts as text inside an HTML element the same template opens; one written in a section, a slot or a component's body prints unmarked, since the template that prints it may put it in a `<title>` or an attribute. Values are marked only where a page's reader needs them, in what a request renders with a key configured: mail, notifications, a response that is neither HTML nor JSON (a robots.txt, an XML feed, a streamed CSV), what a command or a job renders, and every page while no key is set carry none. An Inertia page — Inertia's middleware on the route, or an Inertia visit — gets the source, because its own browser SDK translates it. A notification is translated in the recipient's `preferredLocale()`, from a queued job too, and mail sent while serving an Inertia page is translated rather than handed the page's source text. `langsys.response_kinds` decides it yourself for a route group: `auto`, `server` or `client`.
 
 ### Livewire
 
@@ -172,7 +173,7 @@ LANGSYS_TRANSLATE_RESPONSE=true
 
 Only `text/html` responses are touched. JSON, redirects, streamed and file responses pass through untouched — which is what keeps Livewire and Inertia XHR round-trips out automatically. Scope it further with `only` / `except` path patterns in `config/langsys.php` (`except` wins), and set a `category` to namespace everything the page registers.
 
-The page walk is the one path that registers while serving: what it meets and the catalog lacks is queued and sent **after the response**, by the `langsys.flush` terminable middleware under PHP-FPM and at the end of every **Octane** request and **queued job**. Add `langsys.flush` beside `langsys.translate-page`.
+The page walk registers what it meets while serving, the one path besides a sentence written in from a declared value your last sync did not see: what it meets and the catalog lacks is queued and sent **after the response**, by the `langsys.flush` terminable middleware under PHP-FPM, and at the end of every **Octane** request and every job a **queue worker** runs. Add `langsys.flush` beside `langsys.translate-page`.
 
 > **If you server-render with this and hydrate with a Langsys JS SDK**, use `langsys-js-typescript` **0.6.2 or newer** (or a framework SDK built on it). Its tokenizer skips `data-langsys-phrase` with semantics matching the PHP side; earlier versions re-walk server-tokenized subtrees and split phrases at tag boundaries — `Read the <a>docs</a> now` registers as three fragments — fragmenting the shared catalog silently and putting a count in a different phrase from the noun it inflects. 0.6.0 and 0.6.1 honour the marker only partially, and fail silently when they don't.
 
@@ -188,7 +189,7 @@ Two markers, and the difference is not cosmetic:
 - **`translate="no"`** is standards HTML, so browser translation features (Chrome, Safari, Edge "translate this page") honour it too. Use it for code samples, brand names, identifiers — anything no translator, human or machine, should touch.
 - **`data-notrans`** excludes the subtree from Langsys only; a reader's browser-translation is still free to act on it. Use it for content that's already resolved, or that you handle yourself.
 
-Presence is intent for both: a bare `data-notrans` excludes, and only `="false"` or `="0"` opts back in (trimmed, case-insensitive).
+`translate` excludes only when it says `no`. `data-notrans` excludes by its presence: a bare `data-notrans` excludes, and only `="false"` or `="0"` opts back in (trimmed, case-insensitive).
 
 ### Inertia SSR seeding (Vue/React/Svelte SDKs)
 
@@ -224,6 +225,8 @@ LangsysApp.init({
 use Langsys\Laravel\Facades\Langsys;
 
 Langsys::translate('Save', 'UI');              // a phrase under a category, outside Laravel's translator
+Langsys::getCountries();                       // reference lists in the request's language; also getCurrencies(),
+                                               // getDialCodes() and getLocalesFormat('' | 'flat' | 'data')
 Langsys::client()->getTranslations('es-es');   // vanilla langsys/langsys-php Client
 Langsys::client()->translatePage($html);       // full-page HTML translation
 ```
@@ -239,6 +242,8 @@ Bind a fake client so tests never hit the API:
 ```php
 $this->app->instance(\Langsys\SDK\Client::class, $yourFakeClient);
 ```
+
+Build it with a key and a project id, which it never sends: `__()` asks a bound client that has credentials even where your test environment sets none, and is plain Laravel's while it has none.
 
 This package's own suite shows a complete `FakeClient` pattern in [`tests/Fakes/FakeClient.php`](https://github.com/langsys/langsys-php-laravel/blob/main/tests/Fakes/FakeClient.php). Tests are excluded from the released archive, so read it in the repository rather than under `vendor/`.
 

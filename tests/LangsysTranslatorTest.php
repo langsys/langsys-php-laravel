@@ -30,7 +30,7 @@ class LangsysTranslatorTest extends TestCase
         };
 
         $this->assertSame(
-            "\u{2063}sdk:Welcome {name}:es-es\u{2063}",
+            "\u{2063}sdk:Welcome {name}:es-ES\u{2063}",
             (new LangsysTranslator($client))->translate('Welcome {name}', 'Home', ['name' => 'Sarah'], 'es-ES')
         );
     }
@@ -50,10 +50,35 @@ class LangsysTranslatorTest extends TestCase
         (new LangsysTranslator($client))->translate('Welcome', null, [], 'es-ES');
     }
 
+    /** The same for the calls `__()` and `@lang` go through: whatever the SDK lets through reaches the caller. */
+    public function testResolveAndTranslateRichSwallowNothingEither(): void
+    {
+        $client = new class extends FakeClient {
+            public function resolve($phrase, $locale = null, $category = '__uncategorized__', array $params = [])
+            {
+                throw new ApiException('Invalid request', 404);
+            }
+
+            public function translateRich($sourceHtml, $locale = null, $category = '__uncategorized__', array $params = [])
+            {
+                throw new ApiException('Invalid request', 404);
+            }
+        };
+
+        foreach (['resolve' => 'Welcome', 'translateRich' => 'Read our <a href="/terms">terms</a>'] as $method => $text) {
+            try {
+                (new LangsysTranslator($client))->{$method}($text, null, [], 'es-ES');
+                $this->fail("{$method}: the failure reaches the caller.");
+            } catch (ApiException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
     /**
-     * WIRE-3, observed on the real SDK: Client::translate() keys its catalog by
-     * the locale string it is handed, verbatim, so an `es-ES` lookup misses an
-     * `es-es` catalog and goes to the network. Every host spelling must reach
+     * WIRE-3, observed on the real SDK: every host spelling of a locale reads
+     * the one `es-es` catalog entry, so none misses it and goes to the network.
+     * Every host spelling must reach
      * the one entry.
      */
     public function testEveryHostSpellingOfALocaleReadsTheSameCatalog(): void
@@ -79,12 +104,12 @@ class LangsysTranslatorTest extends TestCase
 
     /**
      * Params must reach the SDK rather than being applied to the returned
-     * string afterwards: the SDK queues the raw placeholder-bearing phrase for
-     * registration and interpolates only what it hands back. Applying params
-     * wrapper-side would still render correctly here, so assert on what the
-     * SDK actually received.
+     * string afterwards: the SDK looks the raw placeholder-bearing phrase up,
+     * `Welcome {name}`, one catalog entry for every runtime value, and
+     * interpolates only what it finds. Applied wrapper-side, the lookup would
+     * be `Welcome Sarah`, which no catalog holds.
      */
-    public function testPassesParamsThroughToTheSdkSoTheRawPhraseIsRegistered(): void
+    public function testPassesParamsThroughToTheSdkSoTheRawPhraseIsLookedUp(): void
     {
         $client = new class extends FakeClient {
             public array $receivedParams = [];
@@ -97,15 +122,12 @@ class LangsysTranslatorTest extends TestCase
             }
         };
 
+        $client->seed('es-ES', 'Home', ['Welcome {name}' => 'Bienvenido, {name}']);
         $translator = new LangsysTranslator($client);
-        $translator->translate('Welcome {name}', 'Home', ['name' => 'Sarah'], 'es-ES');
 
+        $this->assertSame('Bienvenido, Sarah', $translator->translate('Welcome {name}', 'Home', ['name' => 'Sarah'], 'es-ES'));
         $this->assertSame(['name' => 'Sarah'], $client->receivedParams);
-        $this->assertSame(
-            [['phrase' => 'Welcome {name}', 'category' => 'Home']],
-            $client->queuedPhrases,
-            'The catalog must receive the placeholder-bearing phrase, not the interpolated string.'
-        );
+        $this->assertSame(['Welcome {name}'], $client->asked, 'The placeholder-bearing phrase is the lookup, not the interpolated string.');
     }
 
     /**

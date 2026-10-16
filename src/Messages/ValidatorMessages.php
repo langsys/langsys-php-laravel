@@ -28,16 +28,18 @@ final class ValidatorMessages
 {
     /**
      * @param  ?string  $sourceLocale  The language the templates are written in; the app's fallback locale by default.
+     * @param  array<string, list<string>>|null  $ruleMessages  The bag as the rules left it, before any `after()` hook ran; null when none did.
      * @return list<ServerMessage>
      */
-    public static function fromValidator(Validator $validator, ?string $sourceLocale = null): array
+    public static function fromValidator(Validator $validator, ?string $sourceLocale = null, ?array $ruleMessages = null): array
     {
         $sourceLocale = $sourceLocale ?? config('app.fallback_locale');
         $failed = $validator->failed();
         $entries = [];
 
         foreach ($failed as $attribute => $rules) {
-            $messages = $validator->errors()->get((string) $attribute);
+            $all = $validator->errors()->get((string) $attribute);
+            $messages = $ruleMessages === null ? $all : ($ruleMessages[$attribute] ?? []);
             $spans = self::_messageSpans(array_keys($rules), count($messages));
             $cursor = 0;
 
@@ -45,6 +47,11 @@ final class ValidatorMessages
                 $span = array_slice($messages, $cursor, $spans[$rule]);
                 $cursor += $spans[$rule];
                 array_push($entries, ...self::_entries($validator, (string) $attribute, (string) $rule, (array) $parameters, $sourceLocale, $span));
+            }
+
+            // A hook's message on a field its rules failed follows theirs, and is text (MSG-9).
+            foreach (array_slice($all, count($messages)) as $message) {
+                $entries[] = ServerMessage::fromText((string) $message, (string) $attribute);
             }
         }
 
@@ -79,14 +86,38 @@ final class ValidatorMessages
         $object = self::_ruleObject($validator, $attribute, $rule);
 
         if ($object instanceof HasMessageTemplate) {
-            $stated = RuleTemplate::forField($object, $validator->getDisplayableAttribute($attribute));
+            $label = self::_inSourceLocale($validator, $sourceLocale, fn () => $validator->getDisplayableAttribute($attribute));
+            $stated = RuleTemplate::forField($object, $label);
 
             return [ServerMessage::make(self::_code($rule), $stated['template'], $stated['params'], $attribute)];
         }
 
         // Any other rule object, or a closure: the text it produced is the only source there is,
         // one entry per `$fail()`, and the listing reports it so it can be given a template.
-        return array_map(fn (string $text) => ServerMessage::make(self::_code($rule), $text, [], $attribute), $span);
+        return array_map(fn (string $text) => ServerMessage::make(self::_code($rule), self::_lineInSource($validator, $attribute, $rule, $text, $sourceLocale), [], $attribute), $span);
+    }
+
+    /**
+     * A rule object of Laravel's own (`Rules\Enum`, `Rules\Password`) prints one of Laravel's
+     * validation lines, filled in the request's language: the line that fills to its text is
+     * written in the source language instead, as the listing lists it. Text no line fills to, and
+     * an app's own rule's, is sent as it is.
+     */
+    private static function _lineInSource(Validator $validator, string $attribute, string $rule, string $text, ?string $sourceLocale): string
+    {
+        if (!str_starts_with($rule, 'Illuminate\\')) {
+            return $text;
+        }
+
+        $translator = $validator->getTranslator();
+
+        foreach (Arr::dot((array) $translator->get('validation')) as $key => $line) {
+            if (is_string($line) && $validator->makeReplacements($line, $attribute, $rule, []) === $text) {
+                return self::_inSourceLocale($validator, $sourceLocale, fn () => $validator->makeReplacements((string) $translator->get("validation.$key"), $attribute, $rule, []));
+            }
+        }
+
+        return $text;
     }
 
     /**
@@ -143,10 +174,14 @@ final class ValidatorMessages
             return null;
         }
 
-        $line = self::_sourceLine($validator, $attribute, $rule, $sourceLocale ?? config('app.fallback_locale'));
-        [$line, $params] = self::_markMarkers($validator, $line, $attribute, $rule, $parameters, $placeholders);
+        // The line, its labels and the option words written in are all the source language's: the
+        // request's are the message bag's, and the template is what every locale translates from.
+        return self::_inSourceLocale($validator, $sourceLocale ?? config('app.fallback_locale'), function () use ($validator, $attribute, $rule, $parameters, $placeholders, $code) {
+            $line = (string) self::_call($validator, 'getMessage', [$attribute, $rule]);
+            [$line, $params] = self::_markMarkers($validator, $line, $attribute, $rule, $parameters, $placeholders);
 
-        return ServerMessage::make($code, $validator->makeReplacements($line, $attribute, $rule, $parameters), $params, $attribute);
+            return ServerMessage::make($code, $validator->makeReplacements($line, $attribute, $rule, $parameters), $params, $attribute);
+        });
     }
 
     /**
@@ -160,10 +195,15 @@ final class ValidatorMessages
     }
 
     /**
-     * Laravel's line for this failure — a custom message when the application declared one — read
-     * in the language the templates are written in, not in the language of the request.
+     * What Laravel's validator reads through its translator — the line for a failure, a custom
+     * message when the application declared one, a field's label, an option's word — read in the
+     * language the templates are written in, not in the language of the request.
+     *
+     * @template T
+     * @param  \Closure(): T  $read
+     * @return T
      */
-    private static function _sourceLine(Validator $validator, string $attribute, string $rule, ?string $sourceLocale): string
+    private static function _inSourceLocale(Validator $validator, ?string $sourceLocale, \Closure $read): mixed
     {
         $translator = $validator->getTranslator();
         $previous = $translator->getLocale();
@@ -173,7 +213,7 @@ final class ValidatorMessages
         }
 
         try {
-            return (string) self::_call($validator, 'getMessage', [$attribute, $rule]);
+            return $read();
         } finally {
             $translator->setLocale($previous);
         }
@@ -181,13 +221,24 @@ final class ValidatorMessages
 
     /**
      * Replaces the placeholders that hold a non-translatable value with `{name}` markers, and takes
-     * each value from Laravel by asking its replacer for that placeholder alone.
+     * each value from Laravel by asking its replacer for that placeholder alone. Besides each
+     * rule's own, Laravel fills a few in any message — the user's input and a list item's index and
+     * position (`Line #:position`, `:second-index`) — which are values in every template.
      *
      * @return array{0: string, 1: array<string, mixed>}
      */
     private static function _markMarkers(Validator $validator, string $line, string $attribute, string $rule, array $parameters, array $placeholders): array
     {
         $params = [];
+
+        foreach (['input', 'index', 'position', 'ordinal-position'] as $generic) {
+            $placeholders[$generic] ??= RuleWording::MARKER;
+        }
+
+        foreach (['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'] as $nth) {
+            $placeholders["$nth-index"] ??= RuleWording::MARKER;
+            $placeholders["$nth-position"] ??= RuleWording::MARKER;
+        }
 
         // Longest first: `:values` must not be matched as `:value` followed by an "s".
         uksort($placeholders, fn (string $a, string $b) => strlen($b) <=> strlen($a));
@@ -203,31 +254,41 @@ final class ValidatorMessages
                 continue;
             }
 
-            // An operand is either another field or a literal. Asked structurally — does the
-            // parameter name a field of this request? — because comparing the filled value against
-            // the field's label cannot tell them apart: `before:2020-01-01` fills with the same
-            // string either way. A field's label is translatable and belongs in the sentence.
-            if ($kind === RuleWording::OPERAND && self::_namesAnotherField($validator, (string) ($parameters[0] ?? ''))) {
+            // An operand Laravel writes in as another field's label stays in the sentence: a label
+            // is translatable. Anything else it fills — a date, a number, a size — is a value.
+            if ($kind === RuleWording::OPERAND && self::_operandIsALabel($validator, $rule, (string) ($parameters[0] ?? ''))) {
                 continue;
             }
 
+            // A marker's name is a word: Laravel's `:second-index` is `{second_index}`.
+            $marker = str_replace('-', '_', $placeholder);
             $line = str_replace(
                 [':' . $placeholder, ':' . Str::upper($placeholder), ':' . Str::ucfirst($placeholder)],
-                '{' . $placeholder . '}',
+                '{' . $marker . '}',
                 $line
             );
 
             // MSG-4: a number travels as a number.
-            $params[$placeholder] = is_numeric($filled) ? $filled + 0 : $filled;
+            $params[$marker] = is_numeric($filled) ? $filled + 0 : $filled;
         }
 
         return [$line, $params];
     }
 
-    private static function _namesAnotherField(Validator $validator, string $parameter): bool
+    /**
+     * Whether Laravel's replacer writes an operand in as another field's label, decided as it
+     * decides: a date rule's operand when it is no date (`before:ends_at`), a size rule's when it
+     * names a field holding no value. A field holding one is compared by its size, a number.
+     */
+    private static function _operandIsALabel(Validator $validator, string $rule, string $parameter): bool
     {
-        return $parameter !== ''
-            && (array_key_exists($parameter, $validator->getRules()) || Arr::has($validator->getData(), $parameter));
+        if ($parameter === '') {
+            return false;
+        }
+
+        return in_array(self::_code($rule), ['gt', 'gte', 'lt', 'lte'], true)
+            ? !is_numeric($parameter) && Arr::get($validator->getData(), $parameter) === null
+            : strtotime($parameter) === false;
     }
 
     /**

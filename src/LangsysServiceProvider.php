@@ -2,6 +2,7 @@
 
 namespace Langsys\Laravel;
 
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Foundation\Application;
 use Langsys\Laravel\Console\CacheCommand;
 use Langsys\Laravel\Console\ClearCommand;
@@ -10,9 +11,8 @@ use Langsys\Laravel\Console\SyncCommand;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Events\LocaleUpdated;
-use Illuminate\Notifications\Events\NotificationFailed;
-use Illuminate\Notifications\Events\NotificationSending;
-use Illuminate\Notifications\Events\NotificationSent;
+use Illuminate\Foundation\Http\Events\RequestHandled;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Support\Facades\Blade;
@@ -21,7 +21,6 @@ use Illuminate\Translation\Translator;
 use Langsys\Laravel\Cache\LaravelCacheAdapter;
 use Langsys\Laravel\Http\Middleware\AttachServerMessages;
 use Langsys\Laravel\Http\Middleware\MarkResolvedPage;
-use Langsys\Laravel\Http\ResponseKind;
 use Langsys\Laravel\Http\Middleware\DetectLocale;
 use Langsys\Laravel\Http\Middleware\FlushPendingRegistrations;
 use Langsys\Laravel\Http\Middleware\TranslateResponse;
@@ -34,6 +33,9 @@ use Langsys\Laravel\Translation\MigrationFiles;
 use Langsys\Laravel\View\ValueMarker;
 use Langsys\SDK\Client;
 use Langsys\SDK\Snapshot\Snapshot;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 class LangsysServiceProvider extends ServiceProvider
@@ -48,12 +50,14 @@ class LangsysServiceProvider extends ServiceProvider
             $client = new Client($config['api_key'], $config['project_id'], [
                 'api_url'           => $config['api_url'],
                 'require_credentials' => $config['require_credentials'],
-                // FRM-2: what passes through `__()` registers only through `langsys:sync`.
-                'runtime_registration' => !$config['enabled'],
+                // FRM-2: what passes through `__()` or the facade registers through
+                // `langsys:sync`, the package on or off; the core alone registers a sentence
+                // written in from a declared value the last sync did not see (FRM-7).
+                'runtime_registration' => false,
                 'value_sets'        => $config['enabled'] ? ValueSetDiscovery::classes() : [],
                 'messages_category' => $config['messages']['category'],
                 'request_locale'    => RequestLocaleWiring::options(),
-                'snapshot'          => self::_snapshot($config['snapshot'] ?? null),
+                'snapshot'          => $snapshot = self::_snapshot($config['snapshot'] ?? null),
                 'migration'         => $config['enabled']
                     ? MigrationFiles::for($app['translation.loader'], $app->langPath(), $app['config']['app.fallback_locale'])
                     : null,
@@ -64,6 +68,11 @@ class LangsysServiceProvider extends ServiceProvider
                     $config['project_id'],
                 ),
             ]);
+
+            // Offline, the snapshot's locales are the ones served (SRV-6): DetectLocale reads them.
+            if ($snapshot !== null) {
+                $app->instance(Snapshot::class, $snapshot);
+            }
 
             // FRM-3: a catalog miss is answered by the app's own lang files before the source.
             if ($config['enabled']) {
@@ -121,44 +130,84 @@ class LangsysServiceProvider extends ServiceProvider
     }
 
     /**
-     * `@lang` and its alias `@t` print raw, as Laravel's `@lang` does, but text from the catalog
-     * is rendered safe (FRM-8): see `CatalogTranslator::getHtml()`. The block form,
-     * `@lang ... @endlang`, stays Laravel's own. Switched off, both compile as Laravel's `@lang`.
+     * `@lang`, its alias `@t` and `@choice` print raw, as Laravel's do, but text from the catalog is
+     * rendered safe (FRM-8): see `CatalogTranslator::getHtml()` and `choiceHtml()`. The block form,
+     * `@lang ... @endlang` and `@t ... @endt`, prints its text through `getHtml()` as well, with the
+     * values its opening tag names; each block keeps those on a stack of its own, so blocks nest.
+     *
+     * Laravel keeps a compiled view until its template changes, whatever the configuration, so
+     * what a view compiles to is the same on and off, and decides as it renders: switched off,
+     * Laravel's own translator answers `getHtml()` with `get()` and `choiceHtml()` with `choice()`,
+     * which are its own directives, and a marked value prints as Blade prints it.
      */
     private function _registerTranslateDirectives(): void
     {
-        $line = fn (string $expression) => config('langsys.enabled')
-            ? "<?php echo app('translator')->getHtml($expression); ?>"
-            : "<?php echo app('translator')->get($expression); ?>";
+        Translator::macro('getHtml', fn ($key, array $replace = [], $locale = null) => $this->get($key, $replace, $locale));
+        Translator::macro('choiceHtml', fn ($key, $number, array $replace = [], $locale = null) => $this->choice($key, $number, $replace, $locale));
+
+        $line = fn (string $expression) => "<?php echo app('translator')->getHtml($expression); ?>";
 
         $lang = function (?string $expression) use ($line) {
             $expression = trim((string) $expression);
 
             return match (true) {
-                $expression === ''              => '<?php $__env->startTranslation(); ?>',
-                str_starts_with($expression, '[') => "<?php \$__env->startTranslation($expression); ?>",
+                $expression === ''              => '<?php $__lsBlock[] = []; ob_start(); ?>',
+                str_starts_with($expression, '[') => "<?php \$__lsBlock[] = $expression; ob_start(); ?>",
                 default                         => $line($expression),
             };
         };
+        $end = fn () => "<?php echo app('translator')->getHtml(trim(ob_get_clean()), array_pop(\$__lsBlock)); ?>";
 
         Blade::directive('lang', $lang);
         Blade::directive('t', $lang);
+        Blade::directive('endlang', $end);
+        Blade::directive('endt', $end);
+        Blade::directive('choice', fn (?string $expression) => "<?php echo app('translator')->choiceHtml($expression); ?>");
 
         // VAR-5: every value Blade prints in visible text is marked, so a reader turns it back into a
         // placeholder. The echo keeps Blade's own escaping, double encoding included.
         Blade::precompiler(function (string $template) {
-            if (!config('langsys.enabled')) {
-                return $template;
-            }
-
             $compiler = $this->app['blade.compiler'];
             $doubleEncode = (fn () => $this->echoFormat)->call($compiler) === 'e(%s)';
 
-            return ValueMarker::precompile($template, $doubleEncode, fn (string $expression) => $this->app['log']->warning(
+            return ValueMarker::precompile($template, $doubleEncode, fn (string $expression) => config('langsys.enabled') && $this->app['log']->warning(
                 "Blade prints `$expression` in text, which has no name of its own, so its placeholder is `value`: give it a variable whose name says what it is.",
                 ['view' => $compiler->getPath()]
             ));
         });
+
+        // A view a response serves as something other than HTML — a robots.txt, an XML feed —
+        // reaches whatever reads that format as Blade printed it, so its markers come out. HTML
+        // keeps them for its readers, and so does JSON, which carries HTML a page inserts.
+        $this->app['events']->listen(RequestHandled::class, fn (RequestHandled $event) => self::_unmarkUnlessHtml($event->response));
+    }
+
+    private static function _unmarkUnlessHtml(Response $response): void
+    {
+        $type = strtolower((string) $response->headers->get('Content-Type'));
+        // A download is no page, whatever type it declares; Symfony fills in `text/html` for none.
+        $download = str_contains(strtolower((string) $response->headers->get('Content-Disposition')), 'attachment');
+
+        if ($response instanceof JsonResponse || $response instanceof BinaryFileResponse || (!$download && ($type === '' || str_contains($type, 'html')))) {
+            return;
+        }
+
+        // A stream renders as it is sent, after this: what it renders then marks nothing.
+        if ($response instanceof StreamedResponse) {
+            $render = \Closure::bind(fn (StreamedResponse $stream) => $stream->callback, null, StreamedResponse::class)($response);
+
+            if ($render !== null) {
+                $response->setCallback(fn () => ValueMarker::withoutMarks($render));
+            }
+
+            return;
+        }
+
+        $content = $response->getContent();
+
+        if (is_string($content) && str_contains($content, '<!--ls:')) {
+            $response->setContent(ValueMarker::unmark($content));
+        }
     }
 
     private function _registerMiddlewareAliases(): void
@@ -166,14 +215,10 @@ class LangsysServiceProvider extends ServiceProvider
         $router = $this->app['router'];
         $router->aliasMiddleware('langsys.locale', DetectLocale::class);
 
-        // A notification is read by its recipient, not by the page being served (FRM-4).
-        $this->app['events']->listen(NotificationSending::class, fn () => ResponseKind::sending());
-        $this->app['events']->listen([NotificationSent::class, NotificationFailed::class], fn () => ResponseKind::sent());
-
         // The app resolved the locale if anything set it before DetectLocale runs (SRV-6).
         $this->app['events']->listen(
             LocaleUpdated::class,
-            fn () => $this->app['request']->attributes->set(DetectLocale::RESOLVED, true)
+            fn () => app('request')->attributes->set(DetectLocale::RESOLVED, true)
         );
         $router->aliasMiddleware('langsys.flush', FlushPendingRegistrations::class);
 
@@ -181,9 +226,8 @@ class LangsysServiceProvider extends ServiceProvider
         // is opt-in per route/group and must never coexist with @t tagging.
         $router->aliasMiddleware('langsys.translate-page', TranslateResponse::class);
 
-        // The locale cookie is a plain locale code, not a secret. Keeping it
-        // unencrypted lets DetectLocale read it back and lets client-side JS
-        // share the same preference.
+        // The locale cookie holds a plain locale code, not a secret, so it is
+        // stored as the code itself rather than encrypted.
         $this->app->resolving(
             EncryptCookies::class,
             fn (EncryptCookies $middleware) => $middleware->disableFor(config('langsys.locale.cookie'))
@@ -204,7 +248,9 @@ class LangsysServiceProvider extends ServiceProvider
                 return $translator;
             }
 
-            $catalog = new CatalogTranslator($translator->getLoader(), $translator->getLocale(), fn () => ClientState::buildable($app) ? $app->make(LangsysTranslator::class) : null);
+            // The current container's, asked at each call: under Octane the translator outlives the
+            // request it was built in, and the client belongs to the request being served.
+            $catalog = new CatalogTranslator($translator->getLoader(), $translator->getLocale(), fn () => ClientState::buildable() ? app(LangsysTranslator::class) : null);
             $catalog->setFallback($translator->getFallback());
 
             return $catalog;
@@ -255,12 +301,17 @@ class LangsysServiceProvider extends ServiceProvider
     }
 
     /**
-     * The Client is a container singleton, and both Octane workers and queue
-     * workers keep the container across units of work. Without an explicit
-     * boundary the next request or job inherits this one's write decision
-     * (GATE-3) and its in-memory catalog (SRV-2), and discovered phrases wait
-     * for the worker to exit. PHP-FPM needs none of this: the process ends the
-     * scope, and FlushPendingRegistrations::terminate() sends the queue.
+     * The Client is a container singleton. A queue worker keeps its container
+     * across jobs, and an Octane worker serves each request in a sandbox, a
+     * clone of its container, so a client the worker resolved is shared by
+     * every request and one a request resolved lives in its sandbox. The worker
+     * builds it as it starts: the backoff clock is the long-lived object's and
+     * outlives the request (REG-8, CACHE-2), so an outage costs one failing
+     * fetch per window, not one per request. Without an explicit boundary the
+     * next request or job inherits this one's write decision (GATE-3) and its
+     * in-memory catalog (SRV-2), and discovered phrases wait for the worker to
+     * exit. PHP-FPM needs none of this: the process ends the scope, and
+     * FlushPendingRegistrations::terminate() sends the queue.
      */
     private function _registerLongLivedBoundaries(): void
     {
@@ -268,29 +319,44 @@ class LangsysServiceProvider extends ServiceProvider
 
         // Octane is optional. Listening by class name costs nothing without it.
         if (class_exists(\Laravel\Octane\Events\RequestTerminated::class)) {
-            $boundaries[] = \Laravel\Octane\Events\RequestTerminated::class;
+            // A request, a task (`Octane::concurrently()`) and a tick each run in a sandbox of their own.
+            array_push($boundaries, \Laravel\Octane\Events\RequestTerminated::class, \Laravel\Octane\Events\TaskTerminated::class, \Laravel\Octane\Events\TickTerminated::class);
+
+            $this->app['events']->listen(\Laravel\Octane\Events\WorkerStarting::class, fn (object $event) => ClientState::buildable($event->app) && $event->app->make(Client::class));
         }
 
-        $this->app['events']->listen($boundaries, fn () => $this->_endRequestScope());
+        // Octane serves each request in a sandbox, a clone of the worker's container that holds
+        // whatever the request resolved; its event carries it. A queue job runs in this container.
+        // A job on a connection with the sync driver, whatever the app named it, runs inside whatever
+        // dispatched it, a request or a command, which ends its own scope: its end sends nothing
+        // while a request is being served.
+        $this->app['events']->listen($boundaries, function (object $event) {
+            $connection = $event->connectionName ?? null;
+
+            if ($connection === null || ($connection !== 'sync' && config("queue.connections.$connection.driver") !== 'sync')) {
+                self::_endRequestScope($event->sandbox ?? $this->app);
+            }
+        });
     }
 
     /**
-     * Only a Client this unit of work actually used: one it never resolved has
-     * nothing queued, and resolving it here would build a client on every job
-     * and every Octane request for nothing.
+     * Only a Client this unit of work holds: one it resolved, or under Octane
+     * the one the worker built, which every sandbox shares. One that holds none
+     * has nothing queued, and resolving it here would build a client on every
+     * job for nothing.
      *
      * Flush before reset. resetRequestState() drops whatever is still queued —
      * one unit's phrases never ride another's send (REG-8) — so a reset first
      * would discard this unit's discoveries unsent. Neither call can throw — the SDK catches every failure inside
      * both — so nothing here guards them.
      */
-    private function _endRequestScope(): void
+    private static function _endRequestScope(Container $app): void
     {
-        if (!$this->app->resolved(Client::class)) {
+        if (!$app->resolved(Client::class)) {
             return;
         }
 
-        $client = $this->app->make(Client::class);
+        $client = $app->make(Client::class);
         $client->flushPendingRegistrations();
         $client->resetRequestState();
     }

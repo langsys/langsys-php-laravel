@@ -49,12 +49,30 @@ class ResponseKindTest extends TestCase
         $router->middleware(['web', InertiaMiddleware::class])->get('/spa', fn () => __('Pay now'));
         $router->middleware(['web', InertiaMiddleware::class])->get('/spa/ship', [ShippingController::class, 'ship']);
         $router->middleware(['web', InertiaMiddleware::class])->get('/spa/preview', [ShippingController::class, 'preview']);
+        $router->middleware(['web', InertiaMiddleware::class])->get('/spa/deep-mail', function () {
+            \Illuminate\Support\Facades\Mail::send(['text' => 'emails.deep-t'], [], fn ($message) => $message->to('ana@example.com')->subject('Deep'));
+
+            return __('Pay now');
+        });
+        $router->middleware(['web', InertiaMiddleware::class])->get('/spa/payment-preview', fn () => (new \Langsys\Laravel\Tests\Fixtures\Mail\PaymentDue())->render());
         $router->middleware(['web', InertiaMiddleware::class])->get('/spa/plain-mail', function () {
             \Illuminate\Support\Facades\Mail::send('emails.shipped', [], fn ($message) => $message->to('ana@example.com')->subject('Shipped'));
 
             return __('Pay now');
         });
+        $router->middleware(['web', InertiaMiddleware::class])->get('/spa/job', function () {
+            \Illuminate\Support\Facades\Bus::dispatchSync(new \Langsys\Laravel\Tests\Fixtures\TranslatingJob('Pay now'));
+
+            return __('Pay now');
+        });
         $router->middleware(['web', InertiaMiddleware::class])->get('/spa/notify', function () {
+            (new Recipient('Ana', 'es-ES'))->notifyNow(new WelcomeNotification());
+
+            return __('Pay now');
+        });
+        $router->middleware(['web', InertiaMiddleware::class])->get('/spa/notify-cancelled', function () {
+            // Laravel's documented way to cancel: a NotificationSending listener returning false.
+            \Illuminate\Support\Facades\Event::listen(\Illuminate\Notifications\Events\NotificationSending::class, fn () => false);
             (new Recipient('Ana', 'es-ES'))->notifyNow(new WelcomeNotification());
 
             return __('Pay now');
@@ -75,6 +93,31 @@ class ResponseKindTest extends TestCase
     public function testAnInertiaVisitGetsTheSource(): void
     {
         $this->get('/page', ['X-Inertia' => 'true'])->assertSeeText('Pay now');
+    }
+
+    /** Mail is recognised however deep the view that calls `__()` nests inside it. */
+    public function testDeeplyNestedMailFromAClientPageIsTranslated(): void
+    {
+        $this->get('/spa/deep-mail')->assertSeeText('Pay now');
+
+        $this->assertSame('Pagar ahora', trim(app('mailer')->getSymfonyTransport()->messages()->first()->getOriginalMessage()->getTextBody()));
+    }
+
+    /** A group named `auto` is decided by the route, as one not named at all. */
+    public function testAnAutoGroupIsDecidedByTheRoute(): void
+    {
+        config()->set('langsys.response_kinds', ['web' => 'auto']);
+
+        $this->get('/spa')->assertSeeText('Pay now');
+        $this->get('/page')->assertSeeText('Pagar ahora');
+    }
+
+    /** What a Mailable's `content()` translates, before the mailer is reached, is read by its recipient too. */
+    public function testAMailablesContentIsTranslatedFromAClientPage(): void
+    {
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Pay now' => 'Pagar ahora']]);
+
+        $this->get('/spa/payment-preview')->assertSee('<p>Pagar ahora</p>', false);
     }
 
     public function testTheRouteGroupOverrideWins(): void
@@ -122,6 +165,24 @@ class ResponseKindTest extends TestCase
         $this->get('/spa/notify')->assertSeeText('Pay now');
 
         $this->assertSame(['Hola de nuevo, Ana'], RecordingChannel::$sent);
+    }
+
+    /** A queued job run while serving an Inertia page writes for whoever reads its output, not for the page: it gets the translation. */
+    public function testAJobRunFromAClientPageIsTranslated(): void
+    {
+        \Langsys\Laravel\Tests\Fixtures\TranslatingJob::$printed = null;
+
+        $this->get('/spa/job')->assertSeeText('Pay now');
+
+        $this->assertSame('Pagar ahora', \Langsys\Laravel\Tests\Fixtures\TranslatingJob::$printed);
+    }
+
+    /** A notification a listener cancels is never sent, and the page goes on as the page it is. */
+    public function testACancelledNotificationLeavesThePageItsOwnKind(): void
+    {
+        $this->get('/spa/notify-cancelled')->assertSeeText('Pay now');
+
+        $this->assertSame([], RecordingChannel::$sent, 'Control: the notification was cancelled.');
     }
 
     /** Outside a request — a queued job, a command — there is no page to hand the source to. */

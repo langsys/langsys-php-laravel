@@ -51,6 +51,13 @@ class ValueSetsTest extends TestCase
         $this->assertSame([OrderStatus::class, Plan::class, Category::class, Region::class], ValueSetDiscovery::classes());
     }
 
+    /** A class in app/ that cannot load — a dev-only package's provider under `--no-dev` — is not a declaration, and translating still works. */
+    public function testAClassThatCannotLoadIsPassedOver(): void
+    {
+        $this->assertSame([OrderStatus::class, Plan::class, Category::class], ValueSetDiscovery::within(app_path()));
+        $this->assertSame('Explorar libros', __('Browse :category', ['category' => 'Books']));
+    }
+
     /** The case, its backing value and its display word all name the same member. */
     public function testADeclaredValueLooksUpTheSentenceWithTheWordWrittenIn(): void
     {

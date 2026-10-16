@@ -20,6 +20,8 @@ class NegotiatedMessageTest extends TestCase
 {
     private const TEMPLATE = 'The card number field is required.';
     private const SPANISH = 'El número de tarjeta es obligatorio.';
+    private const PASSWORD = 'The password field must be at least {min} characters.';
+    private const PASSWORD_ES = 'La contraseña debe tener al menos {min} caracteres.';
 
     private RecordingClient $client;
 
@@ -27,7 +29,7 @@ class NegotiatedMessageTest extends TestCase
     {
         parent::setUp();
 
-        $this->client = $this->offlineClient(['es-es' => ['Errors' => [self::TEMPLATE => self::SPANISH], '__uncategorized__' => ['Not yours.' => 'No es tuyo.']], 'en-us' => ['Errors' => []]]);
+        $this->client = $this->offlineClient(['es-es' => ['Errors' => [self::TEMPLATE => self::SPANISH, self::PASSWORD => self::PASSWORD_ES], '__uncategorized__' => ['Not yours.' => 'No es tuyo.']], 'en-us' => ['Errors' => []]]);
         $this->client->serveProject(['base_locale' => 'en-us', 'target_locales' => ['es-es']]);
         $this->app->instance(Client::class, $this->client);
     }
@@ -37,9 +39,12 @@ class NegotiatedMessageTest extends TestCase
         $validate = fn (Request $request) => $request->validate(['cc_number' => 'required'], [], ['cc_number' => 'card number']);
 
         $router->middleware('api')->post('/api/cards', $validate);
+        $router->middleware('api')->post('/api/password', fn (Request $request) => $request->validate(['password' => 'min:8']));
         $router->middleware(['api', SetsAppLocale::class])->post('/api/resolved/cards', $validate);
         $router->middleware(['api', 'langsys.locale'])->get('/api/orders/1', fn () => abort(403, __('Not yours.')));
-        $router->middleware(['api', 'langsys.locale'])->get('/api/own', fn () => response()->json(['message' => 'Hi'], 200, ['Content-Language' => 'fr-fr']));
+        $router->middleware(['api', 'langsys.locale'])->get('/api/own', fn () => response()->json(['message' => __('Not yours.')], 200, ['Content-Language' => 'fr-fr']));
+        $router->middleware(['api', 'langsys.locale'])->get('/api/missing', fn () => abort(404, 'No query results for model [Order] 1'));
+        $router->middleware(['api', 'langsys.locale'])->get('/api/nowhere', fn () => abort(403, __('Not anywhere.')));
     }
 
     public function testTheMessageIsInTheNegotiatedLanguage(): void
@@ -51,6 +56,19 @@ class NegotiatedMessageTest extends TestCase
         $this->assertSame('required', $response->json('langsys_errors.0.code'));
         $this->assertSame('es-es', $response->headers->get('Content-Language'));
         $this->assertContains('Accept-Language', $response->headers->all('vary'));
+    }
+
+    /**
+     * MSG-5: an entry renders through its template, with its values, never through `message`, which
+     * is the filled source: `The password field must be at least 8 characters.` is no key.
+     */
+    public function testAnEntryRendersItsTemplateWithItsValues(): void
+    {
+        $response = $this->postJson('/api/password', ['password' => 'abc'], ['Accept-Language' => 'es'])->assertStatus(422);
+
+        $this->assertSame(self::PASSWORD, $response->json('langsys_errors.0.template'));
+        $this->assertSame('The password field must be at least 8 characters.', $response->json('errors.password.0'), 'Control: message and template differ.');
+        $this->assertSame('La contraseña debe tener al menos 8 caracteres.', $response->json('langsys_errors.0.message'));
     }
 
     /**
@@ -67,6 +85,29 @@ class NegotiatedMessageTest extends TestCase
 
         $this->assertSame('en-us', $this->getJson('/api/orders/1', ['Accept-Language' => 'ja'])->headers->get('Content-Language'));
         $this->assertSame('fr-fr', $this->getJson('/api/own', ['Accept-Language' => 'es'])->headers->get('Content-Language'));
+    }
+
+    /**
+     * A line nothing translates is the source, named in the base locale: the app's missing-key
+     * handler handing nothing back leaves it the source.
+     */
+    public function testAMissTheHandlerLeavesIsNamedInTheBaseLocale(): void
+    {
+        $this->missingKeyHandler(fn () => null);
+
+        $response = $this->getJson('/api/nowhere', ['Accept-Language' => 'es'])->assertStatus(403);
+
+        $this->assertSame('Not anywhere.', $response->json('message'));
+        $this->assertSame('en-us', $response->headers->get('Content-Language'));
+    }
+
+    /** A `message` nothing translated — Laravel's own wording, an exception's text — is in no language this package knows, and is not labelled. */
+    public function testAMessageNothingTranslatedNamesNoLanguage(): void
+    {
+        $response = $this->getJson('/api/missing', ['Accept-Language' => 'es;q=0.9, en;q=0.8'])->assertStatus(404);
+
+        $this->assertSame('No query results for model [Order] 1', $response->json('message'));
+        $this->assertNull($response->headers->get('Content-Language'));
     }
 
     /** Laravel's own body is Laravel's: its `message` and `errors` keep the source language. */

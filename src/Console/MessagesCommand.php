@@ -5,7 +5,6 @@ namespace Langsys\Laravel\Console;
 use Illuminate\Console\Command;
 use Langsys\Laravel\Messages\AppMessageSource;
 use Langsys\Laravel\Messages\FormRequestSource;
-use Langsys\Laravel\Support\ClientState;
 use Langsys\SDK\Client;
 use Langsys\SDK\Messages\MessageCatalog;
 use Langsys\SDK\Messages\MessageCatalogCommand;
@@ -26,16 +25,21 @@ class MessagesCommand extends Command
 
     public function handle(): int
     {
+        // Off, the client reads no lang files, so a listing would hold only part of the app.
+        if (!config('langsys.enabled')) {
+            $this->warn('Langsys is switched off (LANGSYS_ENABLED=false), so langsys:messages lists and registers nothing.');
+
+            return self::SUCCESS;
+        }
+
         $sources = [FormRequestSource::fromRoutes($this->laravel['router']), AppMessageSource::discovered()];
 
-        // The lang files carry what the migration cannot convert as it stands (MIG-4,
-        // MIG-7). Building a Client without credentials throws, so only a configured app asks.
-        if (config('langsys.enabled') && ClientState::buildable($this->laravel)) {
-            $legacy = $this->laravel->make(Client::class)->getLegacyKeys();
+        // The lang files carry what the migration cannot convert as it stands (MIG-4, MIG-7). The
+        // client reads them with or without a key.
+        $legacy = $this->laravel->make(Client::class)->getLegacyKeys();
 
-            if ($legacy !== null) {
-                $sources[] = new LegacyKeysSource($legacy);
-            }
+        if ($legacy !== null) {
+            $sources[] = new LegacyKeysSource($legacy);
         }
 
         $catalog = MessageCatalogCommand::collect($sources);

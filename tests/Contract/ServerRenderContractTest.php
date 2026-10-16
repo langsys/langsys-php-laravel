@@ -143,7 +143,7 @@ class ServerRenderContractTest extends ContractTestCase
         $served->assertSeeText('fr-FR');
         $this->assertContains('Accept-Language', $served->headers->all('vary'));
 
-        $this->get('/locale', ['Accept-Language' => 'ja'])->assertSeeText('en-US');
+        $this->assertSame('en', $this->get('/locale', ['Accept-Language' => 'ja'])->getContent(), 'The base, as the app\'s own lang/en spells it.');
         $this->get('/locale?locale=it-IT', ['Accept-Language' => 'es'])->assertSeeText('es-ES', "A query locale the project doesn't serve falls through.");
     }
 }

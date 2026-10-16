@@ -41,7 +41,7 @@ LANGSYS_API_URL=http://langsys2.test/api
 php artisan langsys:sync --dry-run -v     # what would register, per phrase; registers nothing
 php artisan langsys:sync --dry-run --strict   # exits 1 on a call it cannot read as a literal
 php artisan langsys:sync                  # registers, with your lang files' translations
-php artisan langsys:sync --watch          # syncs again whenever a PHP, Blade or lang file changes
+php artisan langsys:sync --watch          # syncs again whenever a scanned or lang file changes; rerun after editing a class or routes
 ```
 
 **Check:**
@@ -72,7 +72,7 @@ curl -s -i -X POST http://your-app.test/api/orders \
 - `Content-Language: es-es` and `Vary: Accept-Language` on the response.
 - Laravel's own `message` and `errors` in English; beside them `langsys_errors`, each entry with `message` in Spanish and `template`, `params` and `code`.
 - `Accept-Language: ja` gives `message` in English and `Content-Language` the project's base locale.
-- A `403` or `abort(404, __('…'))` JSON response carries `Content-Language` too.
+- A `403` or `abort(404, __('…'))` JSON response whose `message` `__()` wrote carries `Content-Language` too; one with Laravel's own wording, such as `Server Error`, carries none.
 - With `LANGSYS_MESSAGES_RESPONSE_KEY=` (empty) nothing is added to the body.
 
 ## 5. Values Blade prints
@@ -108,7 +108,7 @@ final class QuotaExceeded implements HasAppMessageTemplate
 ```
 
 **Check:**
-- `php artisan langsys:messages -v` lists it under the messages category (`Errors` by default) with its code; a backed enum implementing the contract lists each case.
+- `php artisan langsys:messages -v` lists its template beside the class it comes from; a backed enum implementing the contract lists each case.
 - `php artisan langsys:sync` registers it under `Errors`, and the `__()` inside a `template()` never registers again as an uncategorised phrase.
 - A field with no declared label is printed under `Advice:` and does not fail `--strict`.
 
@@ -117,6 +117,7 @@ final class QuotaExceeded implements HasAppMessageTemplate
 The suite passes on all three. To run it against one, in a copy of this package:
 
 ```bash
+composer config audit.block-insecure false   # Laravel 10 and 11 only: Composer blocks their advisories
 composer require --dev -W "laravel/framework:10.*" "orchestra/testbench:^8.22"
 vendor/bin/phpunit
 ```

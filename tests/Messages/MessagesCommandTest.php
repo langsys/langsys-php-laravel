@@ -69,6 +69,11 @@ class MessagesCommandTest extends TestCase
             'The type field is required.',
             'The selected type is invalid.',
             'The VAT number field is required when type is business.',
+            'The VAT number field is required when type is nonprofit.',
+            'The amount field must be greater than deposit.',
+            'The amount field must be greater than {value}.',
+            'Line #{position} needs at least {min}.',
+            '{input} is not a valid email address.',
             'The item code field is required.',
             'The item code field must be a string.',
         ] as $template) {
@@ -167,6 +172,15 @@ class MessagesCommandTest extends TestCase
         $sent = array_column($response->json('langsys_errors'), 'template');
         $this->assertNotEmpty($sent, 'Control: the request must fail.');
         $this->assertContains('The payment reference may not be more than {max} words.', $sent);
+        $this->assertSame([], array_values(array_diff($sent, $this->_templates())));
+
+        // A conditional rule naming several values sends the sentence for the one the request holds,
+        // and a comparison with another field the form for whether that field holds a value.
+        $sent = array_column($this->postJson('/pay', ['type' => 'nonprofit', 'amount' => 5, 'deposit' => 10, 'lines' => [['qty' => 1], ['qty' => 0]], 'contact' => 'bob@@nowhere'])->json('langsys_errors'), 'template');
+        $this->assertContains('The VAT number field is required when type is nonprofit.', $sent);
+        $this->assertContains('The amount field must be greater than {value}.', $sent);
+        $this->assertContains('Line #{position} needs at least {min}.', $sent, 'A position is a value, never part of the sentence.');
+        $this->assertContains('{input} is not a valid email address.', $sent, "The user's input is a value too.");
         $this->assertSame([], array_values(array_diff($sent, $this->_templates())));
     }
 

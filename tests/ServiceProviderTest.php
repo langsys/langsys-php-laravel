@@ -48,10 +48,15 @@ class ServiceProviderTest extends TestCase
      */
     public function testTheProviderScopesTheCacheIndexToTheProject(): void
     {
+        // Both adapters as the provider builds them, for two projects sharing one Laravel store.
+        config()->set('langsys.project_id', 'another-project');
+        $this->app->forgetInstance(Client::class);
+        $other = $this->app->make(Client::class)->getCache();
+
+        config()->set('langsys.project_id', 'test-project');
         $this->app->forgetInstance(Client::class);
         $cache = $this->app->make(Client::class)->getCache();
 
-        $other = new LaravelCacheAdapter($this->app['cache']->store(), 'langsys:', 3600, 'another-project');
         $other->set('translations_another-project_es-es', ['UI' => ['Save' => 'Salvar']]);
         $cache->set('translations_test-project_es-es', ['UI' => ['Save' => 'Guardar']]);
 

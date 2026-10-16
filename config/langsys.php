@@ -43,7 +43,8 @@ return [
     | translation, else your lang files' translation, else the source. With
     | nothing in the catalog that is exactly what Laravel returns on its own.
     | Validation failures also carry entries a client SDK can translate. Turn
-    | it off to debug with plain Laravel: nothing of this package is installed.
+    | it off to debug with plain Laravel: every request is answered as it would
+    | be without this package.
     |
     */
 
@@ -89,7 +90,9 @@ return [
     | `php artisan langsys:sync` registers every literal `__()`, `trans()`,
     | `trans_choice()`, `@lang` and `t()` in your PHP and Blade, and every line
     | of your base-language files, with the translations your other lang
-    | files already have. Nothing registers while serving a request. It reads
+    | files already have. `__()` registers nothing while serving a request,
+    | apart from a sentence built from a declared value the last sync did not
+    | see. It reads
     | app/, routes/ and resources/views/; list other directories here to
     | replace them.
     |

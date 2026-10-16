@@ -1,4 +1,5 @@
 {
     "Save": "Save changes",
-    "Basket": ":count product|:count products"
+    "Basket": ":count product|:count products",
+    "Checkout": "Checkout"
 }

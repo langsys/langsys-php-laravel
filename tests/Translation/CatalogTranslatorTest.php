@@ -57,6 +57,138 @@ class CatalogTranslatorTest extends TestCase
         $this->assertSame('Hola de nuevo, Ana', trans('messages.welcome', ['name' => 'Ana']));
     }
 
+    /**
+     * FRM-1: a key whose value is a list of lines answers a list, as Laravel's does, each line
+     * through the catalog — with nothing in the catalog, exactly Laravel's array.
+     */
+    public function testAKeyHoldingAListAnswersTheListLineByLine(): void
+    {
+        $this->assertSame(['home' => 'Home page'], __('messages.nav'));
+
+        $this->seedCatalog('es-es', ['messages' => ['Home page' => 'Página de inicio']]);
+        $this->app->setLocale('es-ES');
+
+        $this->assertSame(['home' => 'Página de inicio'], __('messages.nav'));
+        $this->assertSame(['home' => 'Página de inicio'], trans('messages.nav'));
+    }
+
+    /** `Lang::has()` answers as Laravel's does for what Laravel's files hold, a list of lines included. */
+    public function testHasAnswersForWhatTheFilesHold(): void
+    {
+        $this->assertTrue(\Illuminate\Support\Facades\Lang::has('messages.welcome'));
+        $this->assertTrue(\Illuminate\Support\Facades\Lang::has('messages.nav'));
+        $this->assertFalse(\Illuminate\Support\Facades\Lang::has('messages.nowhere'));
+        $this->assertTrue(\Illuminate\Support\Facades\Lang::has('Checkout'), 'A JSON line written as its own key is held too.');
+        $this->assertFalse(\Illuminate\Support\Facades\Lang::hasForLocale('messages.welcome', 'es'), 'Only the base files hold it.');
+        $this->assertFalse(\Illuminate\Support\Facades\Lang::has('messages.welcome', 'es', false));
+    }
+
+    /**
+     * The app's missing-key handler hears of a key as Laravel's would tell it: once, in the locale
+     * the call ran in, when nothing answered it — never for a catalog hit, and never for the
+     * spellings and existence probes reading Laravel's own files.
+     */
+    public function testTheMissingKeyHandlerHearsOfAMissOnce(): void
+    {
+        $missed = [];
+        $handled = $this->missingKeyHandler(function (string $key, array $replace, string $locale) use (&$missed) {
+            $missed[] = "$key@$locale";
+
+            return null;
+        });
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Pay now' => 'Pagar ahora']]);
+        $this->app->setLocale('es-ES');
+
+        if (!$handled) {
+            $this->assertSame('Pay later', __('Pay later'), 'A Laravel with no handler prints the line.');
+
+            return;
+        }
+
+        $this->assertSame('Pagar ahora', __('Pay now'));
+        $this->assertSame([], $missed, 'A catalog hit is not a miss.');
+
+        $this->assertSame('Pay later', __('Pay later'));
+        \Illuminate\Support\Facades\Lang::has('messages.nav');
+        \Illuminate\Support\Facades\Lang::has('messages.nowhere');
+        $this->assertSame(['Pay later@es-ES'], $missed, 'has() probes, and is not a miss.');
+    }
+
+    /**
+     * For a choice the handler is told what Laravel's own `choice()` tells it — the locale and the
+     * values, which differ across Laravel's versions — and its line is chosen and filled as that
+     * prints it.
+     */
+    public function testTheMissingKeyHandlersLineIsChosenForAChoice(): void
+    {
+        $heard = [];
+        $handler = function (string $key, array $replace, string $locale) use (&$heard) {
+            $heard[] = [$key, $replace, $locale];
+
+            return ':count item|:count items';
+        };
+        $this->app->setLocale('es-ES');
+
+        if (!$this->missingKeyHandler($handler)) {
+            $this->assertSame('cart.summary', trans_choice('cart.summary', 3), 'A Laravel with no handler prints the key.');
+
+            return;
+        }
+
+        $laravel = new \Illuminate\Translation\Translator($this->app['translation.loader'], 'es-ES');
+        $laravel->setFallback('en');
+        $laravel->handleMissingKeysUsing($handler);
+        $printed = $laravel->choice('cart.summary', 3, ['x' => 1]);
+        [$told, $heard] = [$heard, []];
+
+        $this->assertSame($printed, trans_choice('cart.summary', 3, ['x' => 1]));
+        $this->assertSame($told, $heard);
+        $this->assertSame('3 items', trans_choice('cart.summary', 3, [], 'en'), 'Chosen by the count and filled with it.');
+    }
+
+    /**
+     * Laravel's own `choice()` runs for a handled miss over Laravel's files alone: the catalog is
+     * asked once, by the call itself, never again from inside Laravel's reads.
+     */
+    public function testAHandledMissAsksTheCatalogOnce(): void
+    {
+        $asked = new \ArrayObject();
+        $this->app->instance(\Langsys\Laravel\LangsysTranslator::class, new class ($this->app->make(Client::class), $asked) extends \Langsys\Laravel\LangsysTranslator {
+            public function __construct(Client $client, private \ArrayObject $asked)
+            {
+                parent::__construct($client);
+            }
+
+            public function resolve(string $phrase, ?string $category = null, array $params = [], ?string $locale = null): array
+            {
+                $this->asked->append($phrase);
+
+                return parent::resolve($phrase, $category, $params, $locale);
+            }
+
+            public function translateRich(string $sourceHtml, ?string $category = null, array $params = [], ?string $locale = null): array
+            {
+                $this->asked->append($sourceHtml);
+
+                return parent::translateRich($sourceHtml, $category, $params, $locale);
+            }
+        });
+        $handled = $this->missingKeyHandler(fn () => ':count item|:count items');
+        $this->app->setLocale('es-ES');
+
+        $this->assertSame($handled ? '3 items' : 'cart.summary', trans_choice('cart.summary', 3, [], 'en'));
+        $this->assertSame(['cart.summary'], $asked->getArrayCopy());
+    }
+
+    /** As in Laravel, the line the handler hands back is printed, with the call's values filled. */
+    public function testTheMissingKeyHandlersLineIsPrinted(): void
+    {
+        $handled = $this->missingKeyHandler(fn (string $key, array $replace, string $locale) => "[$locale] Missing: :name");
+        $this->app->setLocale('es-ES');
+
+        $this->assertSame($handled ? '[es-ES] Missing: Ana' : 'Hello Ana', __('Hello :name', ['name' => 'Ana']));
+    }
+
     /** MIG-3: the phrase is the source line under its group, never the key. */
     public function testTheKeyIsNeverThePhrase(): void
     {
@@ -210,6 +342,55 @@ class CatalogTranslatorTest extends TestCase
         $this->assertSame('Hola de nuevo, Ana', __('messages.welcome', ['name' => 'Ana'], 'es_ES'));
     }
 
+    /**
+     * FRM-1: a replacement value prints as Laravel's own translator prints it — an enum by its value,
+     * an object through the app's `Lang::stringable()` handler, a closure wrapping the text its tag
+     * encloses — so with nothing in the catalog `__()` is exactly Laravel's, and a catalog line is
+     * filled with the same values.
+     */
+    public function testAReplacementPrintsAsLaravelPrintsIt(): void
+    {
+        $laravel = new \Illuminate\Translation\Translator($this->app['translation.loader'], 'en');
+        $stringable = fn (\Langsys\Laravel\Tests\Fixtures\Values\Money $money) => '$' . number_format($money->cents / 100, 2);
+
+        if (method_exists($laravel, 'stringable')) {
+            $laravel->stringable($stringable);
+            \Illuminate\Support\Facades\Lang::stringable($stringable);
+        }
+
+        foreach ([
+            ['Status: :status', ['status' => \Langsys\Laravel\Tests\Fixtures\app\Enums\Unmarked::One]],
+            ['Total: :amount', ['amount' => new \Langsys\Laravel\Tests\Fixtures\Values\Money(1250)]],
+            ['Read the <link>terms</link> now', ['link' => fn (string $text) => "<a href=\"/terms\">$text</a>"]],
+        ] as [$key, $replace]) {
+            try {
+                $expected = $laravel->get($key, $replace);
+            } catch (\Throwable $e) {
+                // A value this Laravel cannot print fails in Laravel's own translator too.
+                $this->expectException($e::class);
+            }
+
+            $this->assertSame($expected ?? null, __($key, $replace), $key);
+            unset($expected);
+        }
+
+        $this->seedCatalog('es-es', ['__uncategorized__' => ['Status: {status}' => 'Estado: {status}']]);
+        $this->app->setLocale('es-ES');
+
+        $this->assertSame('Estado: one', __('Status: :status', ['status' => \Langsys\Laravel\Tests\Fixtures\app\Enums\Unmarked::One]), 'A catalog line is filled with the same value.');
+    }
+
+    /** An empty locale is no locale, as in Laravel's own translator: the call is in the current one. */
+    public function testAnEmptyLocaleIsTheCurrentOne(): void
+    {
+        $this->seedCatalog('es-es', ['messages' => ['Welcome back, {name}' => 'Hola de nuevo, {name}'], '__uncategorized__' => ['Pay now' => 'Pagar ahora']]);
+        $this->app->setLocale('es-ES');
+
+        $this->assertSame('Hola de nuevo, Ana', __('messages.welcome', ['name' => 'Ana'], ''));
+        $this->assertSame('Pagar ahora', __('Pay now', [], ''));
+        $this->assertSame('Pagar ahora', trans_choice('Pay now', 1, [], ''));
+    }
+
     public function testHasAnswersWhetherAFileHoldsTheKey(): void
     {
         $this->assertTrue($this->app['translator']->has('messages.welcome'));
@@ -241,14 +422,26 @@ class CatalogTranslatorTest extends TestCase
         ], $this->app->make(Client::class)->getConfig()->getMigration());
     }
 
+    /** A package's JSON lines are the fallback tier, after the framework's groups, as Laravel answers from them. */
+    public function testAPackagesJsonLinesAreTheFallbackTier(): void
+    {
+        $this->app['translation.loader']->addJsonPath(self::FIXTURES . '/courier-json');
+        $this->app->forgetInstance(Client::class);
+
+        $fallback = $this->app->make(Client::class)->getConfig()->getMigration()['fallback_files'];
+
+        $this->assertSame(['path' => self::FIXTURES . '/courier-json/en.json', 'format' => 'laravel'], end($fallback));
+        $this->assertNotNull($this->app->make(Client::class)->resolveLegacyKey('Track it'), 'Its key is a key.');
+    }
+
     public function testValidationLinesAreNotMigrationSourceFiles(): void
     {
         $this->assertNull($this->app->make(Client::class)->resolveLegacyKey('validation.required'));
     }
 
     /**
-     * The translator is resolved on nearly every request; the Client is not. Building one without
-     * credentials throws, so the translator must not build it until a line is actually asked for.
+     * The translator is resolved on nearly every request; the Client is not. An app with no key
+     * builds none at all, so the translator must not build it until a line is actually asked for.
      */
     public function testResolvingTheTranslatorDoesNotBuildTheClient(): void
     {

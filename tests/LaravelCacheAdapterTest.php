@@ -60,9 +60,9 @@ class LaravelCacheAdapterTest extends TestCase
     }
 
     /**
-     * CACHE-1. clear() walks a key index, and two projects sharing a store and
-     * prefix — the default prefix, on a shared Redis — used to share that
-     * index, so clearing one project's cache evicted the other's catalog.
+     * CACHE-1. clear() walks a key index, and two projects can share a store and
+     * prefix — the default prefix, on a shared Redis — so each keeps its own
+     * index, and clearing one project's cache leaves the other's catalog.
      */
     public function testClearingOneProjectLeavesAnotherProjectsKeys(): void
     {
@@ -80,9 +80,8 @@ class LaravelCacheAdapterTest extends TestCase
     }
 
     /**
-     * The SDK writes its catalog without a TTL, and CacheInterface defaults
-     * that argument to 3600 — so an adapter defaulting to the same value never
-     * reached `langsys.cache.ttl`, and the setting did nothing.
+     * The SDK writes its catalog without a TTL, so a write with none lasts
+     * `langsys.cache.ttl`, not CacheInterface's default of 3600.
      */
     public function testTheConfiguredTtlAppliesWhenTheSdkPassesNone(): void
     {

@@ -39,8 +39,8 @@ class LaravelCacheAdapter implements CacheInterface
 
     /**
      * $ttl defaults to null rather than CacheInterface's 3600: the SDK writes
-     * its catalog without passing one, so matching the interface default meant
-     * the configured TTL was never used.
+     * its catalog without passing one, and a write with none lasts the
+     * configured TTL.
      */
     public function set($key, $value, $ttl = null)
     {

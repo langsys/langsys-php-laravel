@@ -22,7 +22,7 @@ final class RuleWording
     /** Several fields' labels, written in as a list. */
     public const LABELS = 'labels';
 
-    /** A translatable value a rule names, written in; a new one registers when first emitted (MSG-8). */
+    /** A translatable value a rule names, written in: `langsys:sync` registers the sentence with each one the rule names (MSG-3). */
     public const VALUE = 'value';
 
     /** Several translatable values, written in as a list. */

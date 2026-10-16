@@ -34,6 +34,7 @@ class ResolvedMarkerTest extends TestCase
         $router->middleware('web')->get('/page', fn () => \Illuminate\Support\Facades\Blade::render(self::PAGE));
         $router->middleware(['web', InertiaMiddleware::class])->get('/spa', fn () => \Illuminate\Support\Facades\Blade::render(self::PAGE));
         $router->middleware('web')->get('/plain', fn () => '<html><body>No translation here</body></html>');
+        $router->middleware('web')->get('/sitemap', fn () => response('<urlset><url>' . __('Pay now') . '</url></urlset>', 200, ['Content-Disposition' => 'attachment; filename="sitemap.xml"']));
     }
 
     public function testAPageRenderedInANonBaseLocaleIsMarkedResolved(): void
@@ -52,6 +53,14 @@ class ResolvedMarkerTest extends TestCase
         $this->assertStringNotContainsString('data-ls-resolved', $this->get('/page')->getContent());
     }
 
+    /** A download is no page, whatever type it declares or Laravel fills in: the file is left as the app wrote it. */
+    public function testADownloadIsNotMarked(): void
+    {
+        $this->app->setLocale('es-ES');
+
+        $this->assertSame('<urlset><url>Pagar ahora</url></urlset>', $this->get('/sitemap')->assertOk()->getContent());
+    }
+
     /** An Inertia page is source, for its own SDK to translate (FRM-4). */
     public function testAnInertiaPageIsNotMarked(): void
     {
@@ -68,5 +77,6 @@ class ResolvedMarkerTest extends TestCase
         config()->set('langsys.api_key', null);
 
         $this->get('/plain')->assertOk()->assertSee('<html><body>No translation here</body></html>', false);
+        $this->assertFalse($this->app->resolved(Client::class), 'Marking built no client.');
     }
 }

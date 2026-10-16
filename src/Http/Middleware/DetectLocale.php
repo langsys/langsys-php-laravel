@@ -6,12 +6,14 @@ use Closure;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
 use Langsys\Laravel\Support\ClientState;
+use Langsys\Laravel\Support\LaravelLocales;
 use Langsys\Laravel\Support\LocaleFormatter;
 use Langsys\Laravel\Support\RequestLocaleWiring;
 use Langsys\SDK\Client;
 use Langsys\SDK\Exception\ConfigurationException;
 use Langsys\SDK\Locale\LocaleDetector;
 use Langsys\SDK\Locale\RequestLocale;
+use Langsys\SDK\Snapshot\Snapshot;
 use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
@@ -38,6 +40,13 @@ class DetectLocale
      */
     public const RESOLVED = 'langsys.locale_resolved';
 
+    /**
+     * Set on the request to [Laravel's locale, the locale it is served in]: what the core made of
+     * Laravel's locale (`es` is the project's default Spanish, one the project does not serve is
+     * its base), which every lookup this request runs in while Laravel's locale stays the same.
+     */
+    public const SERVED = 'langsys.served_locale';
+
     /** What each source varies on. The query string is part of the URL, the cache key already. */
     private const VARY = ['query' => null, 'cookie' => 'Cookie', 'session' => 'Cookie', 'header' => 'Accept-Language'];
 
@@ -61,6 +70,7 @@ class DetectLocale
 
             if ($choice['locale'] !== null) {
                 $client->setLocale($choice['locale']);
+                $request->attributes->set(self::SERVED, [app()->getLocale(), $choice['locale']]);
             }
 
             return $next($request);
@@ -72,8 +82,15 @@ class DetectLocale
             // `require_credentials` asked for a missing key to fail the request, not to degrade it.
             throw $e;
         } catch (Throwable) {
-            // Nothing can be validated without the project's locales; Laravel's stands, untouched.
-            return $next($request);
+            // Offline, a loaded snapshot answers for authorization: its base and locales are the
+            // locales served (SRV-6, SNAP-2). Without one nothing can be validated, and Laravel's
+            // locale stands, untouched.
+            if (!$this->app->bound(Snapshot::class)) {
+                return $next($request);
+            }
+
+            $snapshot = $this->app->make(Snapshot::class);
+            $project = ['base_locale' => $snapshot->baseLocale(), 'target_locales' => $snapshot->locales()];
         }
 
         $base = LocaleDetector::normalize((string) ($project['base_locale'] ?? ''));
@@ -82,8 +99,11 @@ class DetectLocale
 
         [$locale, $source, $vary] = $this->_resolve($request, $served, $base, $defaults);
 
-        app()->setLocale(LocaleFormatter::canonicalize($locale));
+        // In the spelling the app's own lang files use, as `langsys:sync` reads them, so an app laid
+        // out as `lang/es` answers a miss with its own line; otherwise canonical BCP 47.
+        app()->setLocale(LaravelLocales::inLangPath($this->app->langPath(), $locale) ?? LocaleFormatter::canonicalize($locale));
         $client->setLocale($locale);
+        $request->attributes->set(self::SERVED, [app()->getLocale(), $locale]);
 
         $persist = $source === 'query' ? config('langsys.locale.persist') : null;
 

@@ -8,3 +8,4 @@
 <p>@lang('legal.terms')</p>
 <p>@lang('legal.privacy')</p>
 <p>{{ strlen($label) + 1 }} items</p>
+<p>@choice(':count <b>item</b> left|:count <b>items</b> left', $count)</p>

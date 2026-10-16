@@ -13,5 +13,9 @@ class EnabledByDefaultTest extends TestCase
         $this->assertTrue(config('langsys.enabled'));
         $this->assertInstanceOf(CatalogTranslator::class, $this->app['translator']);
         $this->assertInstanceOf(MessageValidator::class, \Illuminate\Support\Facades\Validator::make([], []));
+
+        // Installing is the configuration (MIG-1): the client is given Laravel's own base-language files.
+        $this->app->forgetInstance(\Langsys\SDK\Client::class);
+        $this->assertNotNull($this->app->make(\Langsys\SDK\Client::class)->getLegacyKeys());
     }
 }

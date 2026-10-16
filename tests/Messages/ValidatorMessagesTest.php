@@ -33,6 +33,11 @@ class ValidatorMessagesTest extends TestCase
             'required_if on a value'   => ['rules' => ['vat_id' => 'required_if:type,business'], 'data' => ['type' => 'business'], 'attributes' => ['vat_id' => 'VAT number'], 'field' => 'vat_id'],
             'before a literal date'    => ['rules' => ['born_on' => 'date|before:2020-01-01'], 'data' => ['born_on' => '2024-05-05'], 'attributes' => [], 'field' => 'born_on'],
             'before another field'     => ['rules' => ['starts_at' => 'date|before:ends_at'], 'data' => ['starts_at' => '2024-05-05', 'ends_at' => '2024-01-01'], 'attributes' => ['ends_at' => 'end date'], 'field' => 'starts_at'],
+            'before a field left empty' => ['rules' => ['starts_at' => 'date|before:ends_at', 'ends_at' => 'nullable|date'], 'data' => ['starts_at' => '2024-05-05'], 'attributes' => ['ends_at' => 'end date'], 'field' => 'starts_at'],
+            'before a field nothing declares' => ['rules' => ['starts_at' => 'date|before:ends_at'], 'data' => ['starts_at' => '2024-05-05'], 'attributes' => ['ends_at' => 'end date'], 'field' => 'starts_at'],
+            'gt another field holding a value' => ['rules' => ['price' => 'numeric|gt:min_price'], 'data' => ['price' => 5, 'min_price' => 10], 'attributes' => ['min_price' => 'minimum price'], 'field' => 'price'],
+            'gt another field left empty' => ['rules' => ['price' => 'numeric|gt:min_price'], 'data' => ['price' => 5], 'attributes' => ['min_price' => 'minimum price'], 'field' => 'price'],
+            'gt a number'              => ['rules' => ['qty' => 'numeric|gt:0'], 'data' => ['qty' => -1], 'attributes' => [], 'field' => 'qty'],
             'a list of file types'     => ['rules' => ['avatar' => 'mimes:pdf,png'], 'data' => ['avatar' => 'x'], 'attributes' => [], 'field' => 'avatar'],
             'digits'                   => ['rules' => ['pin' => 'digits:4'], 'data' => ['pin' => '123'], 'attributes' => [], 'field' => 'pin'],
             'required_with'            => ['rules' => ['city' => 'required_with:street,zip'], 'data' => ['street' => 'Main'], 'attributes' => ['street' => 'street name'], 'field' => 'city'],
@@ -83,6 +88,17 @@ class ValidatorMessagesTest extends TestCase
         $this->assertStringContainsString('card number', $this->_entry($this->_cases()['required'])->getTemplate());
         $this->assertStringContainsString('password confirmation', $this->_entry($this->_cases()['same as another field'])->getTemplate());
         $this->assertStringContainsString('end date', $this->_entry($this->_cases()['before another field'])->getTemplate());
+        $this->assertStringContainsString('end date', $this->_entry($this->_cases()['before a field left empty'])->getTemplate(), 'A field the request declares names a field, sent or not.');
+        $this->assertSame('The starts at field must be a date before end date.', $this->_entry($this->_cases()['before a field nothing declares'])->getTemplate(), 'An operand that is no date names a field, as Laravel reads it.');
+        $this->assertSame('The price field must be greater than minimum price.', $this->_entry($this->_cases()['gt another field left empty'])->getTemplate(), 'An empty field is written in by its label.');
+
+        $holding = $this->_entry($this->_cases()['gt another field holding a value']);
+        $this->assertSame('The price field must be greater than {value}.', $holding->getTemplate(), "A field holding a value is compared by that value's size, a number.");
+        $this->assertSame(['value' => 10], $holding->getParams());
+
+        $number = $this->_entry($this->_cases()['gt a number']);
+        $this->assertSame('The qty field must be greater than {value}.', $number->getTemplate(), 'A number is a value, never a label.');
+        $this->assertSame(['value' => 0], $number->getParams());
     }
 
     /** MSG-11 and MSG-4: a value that cannot be translated stays outside the phrase, and a number stays a number. */
@@ -213,5 +229,54 @@ class ValidatorMessagesTest extends TestCase
         $this->assertArrayNotHasKey('code', $entries[0]->toArray());
         $this->assertSame('This link has expired.', $entries[0]->getTemplate());
         $this->assertSame('token', $entries[0]->getField());
+    }
+
+    /**
+     * MSG-3: what Laravel fills into any message — the user's input, a list item's position — is a
+     * value, a marker in the template, so one sentence serves every input and every item.
+     */
+    public function testTheInputAndAPositionAreMarkers(): void
+    {
+        $validator = Validator::make(
+            ['contact' => 'bob@@nowhere', 'lines' => [['qty' => 1], ['qty' => 0]]],
+            ['contact' => 'email', 'lines.*.qty' => 'integer|min:1'],
+            ['contact.email' => ':input is not a valid email address.', 'lines.*.qty.min' => 'Line #:position needs at least :min.']
+        );
+        $validator->fails();
+
+        $entries = array_map(fn ($entry) => [$entry->getTemplate(), $entry->getParams()], $validator->serverMessages());
+
+        $this->assertContains(['{input} is not a valid email address.', ['input' => 'bob@@nowhere']], $entries);
+        $this->assertContains(['Line #{position} needs at least {min}.', ['position' => 2, 'min' => 1]], $entries);
+
+        $nested = Validator::make(['groups' => [['items' => [['qty' => 1]]], ['items' => [['qty' => 0]]]]], ['groups.*.items.*.qty' => 'integer|min:1'], ['groups.*.items.*.qty.min' => 'Group :first-position, item :second-position: at least :min.']);
+        $nested->fails();
+
+        $this->assertSame([['Group {first_position}, item {second_position}: at least {min}.', ['first_position' => 2, 'second_position' => 1, 'min' => 1]]], array_map(fn ($entry) => [$entry->getTemplate(), $entry->getParams()], $nested->serverMessages()), "A marker's name is a word: Laravel's dashed placeholders take an underscore.");
+    }
+
+    /**
+     * An `after()` hook's message on a field its rules also failed is an entry of its own, its text
+     * its template (MSG-9): Laravel runs every rule, then the hooks, so the hook's message follows
+     * the rules' — and is never filed under a rule object on that field.
+     */
+    public function testAHooksMessageOnAFailedFieldIsAnEntryOfItsOwn(): void
+    {
+        $validator = Validator::make(['email' => '', 'nick' => 'x'], [
+            'email' => 'required',
+            'nick'  => [fn (string $attribute, mixed $value, \Closure $fail) => $fail('That nickname is taken.')],
+        ])->after(function ($validator) {
+            $validator->errors()->add('email', 'That domain is blocked.');
+            $validator->errors()->add('nick', 'Nicknames are closed today.');
+        });
+        $validator->fails();
+
+        $entries = array_map(fn ($entry) => [$entry->getField(), $entry->getTemplate(), $entry->getCode()], $validator->serverMessages());
+
+        $this->assertCount(4, $validator->errors()->all(), 'Control: the bag holds both rules\' messages and both hooks\'.');
+        $this->assertContains(['email', 'The email field is required.', 'required'], $entries);
+        $this->assertContains(['email', 'That domain is blocked.', null], $entries);
+        $this->assertContains(['nick', 'Nicknames are closed today.', null], $entries);
+        $this->assertCount(4, $entries);
     }
 }

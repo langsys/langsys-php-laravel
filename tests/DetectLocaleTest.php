@@ -2,6 +2,8 @@
 
 namespace Langsys\Laravel\Tests;
 
+use Illuminate\Support\Facades\Validator;
+use Langsys\Laravel\Support\InertiaSsrProps;
 use Langsys\Laravel\Tests\Fakes\FakeClient;
 use Langsys\Laravel\Tests\Fixtures\SetsAppLocale;
 use Langsys\SDK\Client;
@@ -22,12 +24,42 @@ class DetectLocaleTest extends TestCase
         'default_locales' => ['es' => 'es-mx'],
     ];
 
+    protected function defineEnvironment($app): void
+    {
+        parent::defineEnvironment($app);
+        $app->useLangPath(__DIR__ . '/Fixtures/lang-unserved');
+    }
+
     protected function defineRoutes($router): void
     {
         $router->middleware(['web', SetsAppLocale::class, 'langsys.locale'])->get('/probe', fn () => response()->json([
             'app_locale'    => app()->getLocale(),
             'client_locale' => $this->app->make(Client::class)->getLocale(),
         ]));
+        $router->middleware(['web', SetsAppLocale::class, 'langsys.locale'])->get('/save', fn () => response()->json(['text' => __('Save')]));
+        $router->middleware(['web', SetsAppLocale::class, 'langsys.locale'])->get('/page', fn () => '<html><body><p>' . e(__('Save')) . '</p></body></html>');
+        $router->middleware(['web', SetsAppLocale::class, 'langsys.locale', 'langsys.translate-page'])->get('/walked', fn () => '<html><body><p>Save</p></body></html>');
+        $router->middleware(['web', SetsAppLocale::class, 'langsys.locale'])->get('/notify', function () {
+            \Langsys\Laravel\Tests\Fixtures\Notifications\RecordingChannel::$sent = [];
+            (new \Langsys\Laravel\Tests\Fixtures\Notifications\Recipient('Ana', 'fr-FR'))->notifyNow(new \Langsys\Laravel\Tests\Fixtures\Notifications\SaveNotification());
+
+            return response()->json(['sent' => \Langsys\Laravel\Tests\Fixtures\Notifications\RecordingChannel::$sent]);
+        });
+        $router->middleware(['api', SetsAppLocale::class, 'langsys.locale'])->get('/api/denied', fn () => abort(403, __('Not yours.')));
+        $router->middleware(['api', SetsAppLocale::class, 'langsys.locale'])->get('/api/denied-here', fn () => abort(403, __('Not yours.', [], '')));
+        $router->middleware(['api', 'langsys.locale'])->post('/api/cards', fn () => request()->validate(['cc_number' => 'required']));
+        $router->middleware(['web', SetsAppLocale::class, 'langsys.locale'])->get('/seed', fn () => response()->json(InertiaSsrProps::share()));
+        $router->middleware(['web', SetsAppLocale::class, 'langsys.locale'])->get('/validated', function () {
+            Validator::make([], ['name' => 'required'])->fails();
+
+            return response()->json(['client_locale' => $this->app->make(Client::class)->getLocale()]);
+        });
+        $router->middleware(['web', SetsAppLocale::class, 'langsys.locale'])->get('/validated-after-switch', function () {
+            app()->setLocale('fr');
+            Validator::make([], ['name' => 'required'])->fails();
+
+            return response()->json(['client_locale' => $this->app->make(Client::class)->getLocale()]);
+        });
     }
 
     protected function setUp(): void
@@ -87,10 +119,140 @@ class DetectLocaleTest extends TestCase
         $this->get('/probe', ['X-App-Locale' => 'es_ES'])->assertJson(['client_locale' => 'es-es']);
     }
 
+    /** What the app set is served in the project's form everywhere, not only on the client: a bare language reads the project's default for it. */
+    public function testTheMappedLocaleIsTheOneLookedUp(): void
+    {
+        $this->fakeClient->seed('es-mx', '__uncategorized__', ['Save' => 'Guardar (MX)']);
+
+        $this->get('/save', ['X-App-Locale' => 'es'])->assertJson(['text' => 'Guardar (MX)']);
+    }
+
+    /**
+     * FRM-1: a locale the project does not serve is served the base catalog, and on a miss the
+     * app's own line for the locale it set is printed, exactly as Laravel prints it without Langsys.
+     */
+    public function testAnUnservedLocaleStillPrintsTheAppsOwnLine(): void
+    {
+        $this->_providersClient();
+        $this->seedCatalog('en-us', ['__uncategorized__' => []]);
+
+        $this->get('/probe', ['X-App-Locale' => 'ja'])->assertJson(['client_locale' => 'en-us']);
+        $this->get('/save', ['X-App-Locale' => 'ja'])->assertJson(['text' => '保存']);
+    }
+
+    /** The page walk, the Inertia seed and a failed validation's entries run in the locale served too, not in Laravel's spelling of it. */
+    public function testEverySiteRunsInTheServedLocale(): void
+    {
+        config()->set('langsys.translate_response.enabled', true);
+        $this->fakeClient->seed('es-mx', '__uncategorized__', ['Save' => 'Guardar (MX)']);
+
+        $this->get('/walked', ['X-App-Locale' => 'es'])->assertOk();
+        $this->assertSame('es-mx', $this->fakeClient->translatedPages[0]['locale']);
+
+        $this->get('/seed', ['X-App-Locale' => 'es'])->assertJson(['langsys' => ['initialTranslationsLocale' => 'es-mx', 'initialTranslations' => ['__uncategorized__' => ['Save' => 'Guardar (MX)']]]]);
+
+        $this->get('/validated', ['X-App-Locale' => 'es'])->assertJson(['client_locale' => 'es-mx']);
+
+        // A locale the app sets afterwards is its own, and the entries are emitted in it.
+        $this->get('/validated-after-switch', ['X-App-Locale' => 'es'])->assertJson(['client_locale' => 'fr']);
+    }
+
+    /** The app's missing-key handler is told the locale Laravel holds, as Laravel would tell it, not the one the catalog is served in. */
+    public function testTheMissingKeyHandlerIsToldLaravelsLocale(): void
+    {
+        $missed = [];
+        $handled = $this->missingKeyHandler(function (string $key, array $replace, string $locale) use (&$missed) {
+            $missed[] = "$key@$locale";
+
+            return null;
+        });
+
+        $this->get('/save', ['X-App-Locale' => 'es'])->assertJson(['text' => 'Save']);
+        $this->assertSame($handled ? ['Save@es'] : [], $missed);
+    }
+
+    /** FRM-4: a notification sent while serving is read in its recipient's locale, not the one the request is served in. */
+    public function testANotificationSentWhileServingIsInItsRecipientsLocale(): void
+    {
+        $this->fakeClient->seed('es-mx', '__uncategorized__', ['Save' => 'Guardar (MX)']);
+        $this->fakeClient->seed('fr-fr', '__uncategorized__', ['Save' => 'Enregistrer']);
+
+        $this->get('/notify', ['X-App-Locale' => 'es'])->assertJson(['sent' => ['Enregistrer']]);
+    }
+
+    /** FRM-5: a JSON message the app's own lang file answered is in the locale Laravel read it in, not the one the catalog is served in. */
+    public function testAnAppsOwnLineIsNamedInLaravelsLocale(): void
+    {
+        $this->_providersClient();
+        $this->seedCatalog('es-mx', ['__uncategorized__' => []]);
+
+        $response = $this->getJson('/api/denied', ['X-App-Locale' => 'es'])->assertStatus(403);
+
+        $this->assertSame('No es tuyo.', $response->json('message'));
+        $this->assertSame('es', $response->headers->get('Content-Language'));
+
+        $response = $this->getJson('/api/denied-here', ['X-App-Locale' => 'es'])->assertStatus(403);
+        $this->assertSame('es', $response->headers->get('Content-Language'), 'An empty locale is the current one.');
+    }
+
+    /**
+     * The client the provider builds, whose miss fallback reads the app's lang files, with the
+     * project's authorization cached under the core's own key, as a later request finds it.
+     */
+    private function _providersClient(): void
+    {
+        config()->set('langsys.api_url', self::UNREACHABLE_API);
+        $this->app->forgetInstance(Client::class);
+        $this->app->make(Client::class)->getCache()->set('auth_test-project_' . substr(hash('sha256', 'test-key'), 0, 12), self::SERVED);
+    }
+
+    /**
+     * FRM-1: the locale DetectLocale resolves is set in the spelling the app's own `lang/` uses, as
+     * `langsys:sync` reads it, so an app laid out as `lang/es` still answers a miss with its line.
+     */
+    public function testTheResolvedLocaleIsSetAsTheAppsLangFilesSpellIt(): void
+    {
+        $this->_providersClient();
+        $this->seedCatalog('es-mx', ['__uncategorized__' => []]);
+
+        $this->getJson('/api/denied?locale=es-MX')->assertStatus(403)->assertJsonPath('message', 'No es tuyo.');
+        $this->assertSame('es', app()->getLocale());
+
+        $this->seedCatalog('pt-br', ['__uncategorized__' => []]);
+        $this->getJson('/api/denied?locale=pt-BR')->assertStatus(403)->assertJsonPath('message', 'Não é seu.');
+        $this->assertSame('pt_BR', app()->getLocale(), 'A regional spelling is the app\'s too.');
+    }
+
+    /**
+     * FRM-5: a JSON response's entries are in the locale the request is served in, not the one
+     * Laravel's spelling of it would map to: `lang/es` holds Laravel's locale as `es`, which alone
+     * is the project's default Spanish, while the request was served in `es-es`.
+     */
+    public function testAJsonFailuresEntriesAreInTheLocaleServed(): void
+    {
+        $this->_providersClient();
+        $this->seedCatalog('es-es', ['Errors' => []]);
+        $this->seedCatalog('es-mx', ['Errors' => []]);
+
+        $response = $this->postJson('/api/cards?locale=es-ES', [])->assertStatus(422);
+
+        $this->assertSame('es', app()->getLocale(), "Control: Laravel's locale is the app's own spelling.");
+        $this->assertSame('es-es', $response->headers->get('Content-Language'));
+    }
+
+    /** GATE-10: a page is marked resolved in the locale it was served in, so one the project does not serve is the base, and stays source. */
+    public function testAPageServedInTheBaseForAnUnservedLocaleIsNotMarked(): void
+    {
+        $this->fakeClient->seed('es-mx', '__uncategorized__', ['Save' => 'Guardar (MX)']);
+
+        $this->assertStringContainsString('data-ls-resolved="es-mx"', $this->get('/page', ['X-App-Locale' => 'es'])->getContent(), 'Control: a translated page is marked.');
+        $this->assertStringNotContainsString('data-ls-resolved', $this->get('/page', ['X-App-Locale' => 'ja'])->getContent());
+    }
+
     /** The same mapping when DetectLocale resolves: a bare language in the query string. */
     public function testABareLanguageCandidateMapsToTheProjectsDefault(): void
     {
-        $this->get('/probe?locale=es')->assertJson(['app_locale' => 'es-MX', 'client_locale' => 'es-mx']);
+        $this->get('/probe?locale=es')->assertJson(['app_locale' => 'es', 'client_locale' => 'es-mx']);
     }
 
     /** A locale the project does not serve is served as the base locale; Laravel's own locale is left as the app set it. */
@@ -104,7 +266,7 @@ class DetectLocaleTest extends TestCase
         $response = $this->withUnencryptedCookie('langsys_locale', 'fr-FR')
             ->get('/probe?locale=es-ES', ['Accept-Language' => 'de-DE']);
 
-        $response->assertJson(['app_locale' => 'es-ES', 'client_locale' => 'es-es']);
+        $response->assertJson(['app_locale' => 'es', 'client_locale' => 'es-es']);
         $this->assertSame('es-ES', $response->getCookie('langsys_locale', false)?->getValue());
         $this->assertSame([], $this->_vary($response), 'The URL is already the cache key.');
     }
@@ -184,9 +346,10 @@ class DetectLocaleTest extends TestCase
         $this->assertNull($response->getCookie('langsys_locale', false));
     }
 
+    /** A locale the app's `lang/` has no spelling of is set as canonical BCP 47. */
     public function testAQueryValueIsNormalized(): void
     {
-        $this->get('/probe?locale=pt_br')->assertJson(['app_locale' => 'pt-BR']);
+        $this->get('/probe?locale=it_it')->assertJson(['app_locale' => 'it-IT', 'client_locale' => 'it-it']);
     }
 
     /** RFC 7231: q=0 means "not acceptable". Nothing usable, so the base locale; the header was still consulted. */

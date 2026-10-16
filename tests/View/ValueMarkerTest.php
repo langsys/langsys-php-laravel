@@ -12,6 +12,12 @@ use Langsys\Laravel\Tests\TestCase;
  */
 class ValueMarkerTest extends TestCase
 {
+    protected function defineEnvironment($app): void
+    {
+        parent::defineEnvironment($app);
+        $app['config']->set('view.paths', [__DIR__ . '/../Fixtures/views', ...(array) $app['config']->get('view.paths')]);
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -73,7 +79,7 @@ class ValueMarkerTest extends TestCase
 
     public function testNothingOutsideVisibleTextIsMarked(): void
     {
-        $data = ['name' => 'Ana', 'html' => new HtmlString('<em>Ana</em>')];
+        $data = ['name' => 'Ana', 'html' => new HtmlString('<em>Ana</em>'), 'user' => (object) ['locked' => false, 'attrs' => 'data-x="1"']];
 
         foreach ([
             '<input value="{{ $name }}">'                 => '<input value="Ana">',
@@ -86,10 +92,76 @@ class ValueMarkerTest extends TestCase
             '<p>{{ $html }}</p>'                          => '<p><em>Ana</em></p>',
             '<p>{{ __(\'Hello\') }}</p>'                  => '<p>Hello</p>',
             '<!-- a > b: {{ $name }} --><p>x</p>'         => '<!-- a > b: Ana --><p>x</p>',
+            '<p><!-- a > b: {{ $name }} --></p>'          => '<p><!-- a > b: Ana --></p>',
+            // An element closed, or one that holds nothing, leaves the value outside any element.
+            '<p>Hi</p>{{ $name }}'                        => '<p>Hi</p>Ana',
+            '<meta charset="utf-8">{{ $name }}'           => '<meta charset="utf-8">Ana',
             '<p>@{{ $name }}</p>'                         => '<p>{{ $name }}</p>',
+            // A `>` inside a directive's arguments or a raw echo in a tag does not end the tag.
+            '<input @disabled($user->locked) value="{{ $name }}">'                  => '<input  value="Ana">',
+            '<span @class([\'p-4\', \'bold\' => true]) title="{{ $name }}">x</span>' => '<span class="p-4 bold" title="Ana">x</span>',
+            '<div {!! $user->attrs !!} title="{{ $name }}">x</div>'                => '<div data-x="1" title="Ana">x</div>',
         ] as $template => $expected) {
             $this->assertSame($expected, Blade::render($template, $data), $template);
         }
+    }
+
+    /** An echo Blade accepts compiles: Laravel drops a trailing semicolon, and so does the marker. */
+    public function testAnEchoEndingInASemicolonIsMarked(): void
+    {
+        $this->assertSame('<p><!--ls:name-->Ana<!--/ls--></p>', Blade::render('<p>{{ $name; }}</p>', ['name' => 'Ana']));
+    }
+
+    /**
+     * A value written in a section, a slot or a component's body lands where another template
+     * prints it — a `<title>`, an attribute, a script, a `<textarea>` — so it is printed as Blade
+     * prints it; one inside an element its own template opens is marked.
+     */
+    public function testAValueIsMarkedOnlyWhereItsOwnTemplateSaysItIsText(): void
+    {
+        $this->assertSame(
+            "<html><head><title>My Post</title><meta name=\"description\" content=\"A summary\"><script>var count = 3;</script></head><body><p><!--ls:post-->My Post<!--/ls--></p></body></html>\n",
+            view('post', ['post' => 'My Post', 'summary' => 'A summary', 'count' => 3])->render()
+        );
+        $this->assertSame(
+            "<title>Ana page</title><textarea name=\"bio\">I like tea</textarea>",
+            trim(Blade::render('<x-profile><x-slot:title>{{ $title }}</x-slot:title>{{ $bio }}</x-profile>', ['title' => 'Ana page', 'bio' => 'I like tea']))
+        );
+    }
+
+    /**
+     * Blade compiles a component tag to `@component` before any precompiler reads the template, so
+     * a component's body and its slots start at the top whatever element the component sits in,
+     * as a legacy `@component` and `@slot` do; the element around the component is text again after it.
+     */
+    public function testAComponentInsideAnElementPrintsItsBodyAsBladeDoes(): void
+    {
+        $data = ['title' => 'Ana page', 'bio' => 'I like tea', 'after' => 'Done'];
+        $expected = '<div><title>Ana page</title><textarea name="bio">I like tea</textarea><!--ls:after-->Done<!--/ls--></div>';
+
+        foreach ([
+            '<div><x-profile><x-slot:title>{{ $title }}</x-slot:title>{{ $bio }}</x-profile>{{ $after }}</div>',
+            '<div><x-profile><x-slot name="title">{{ $title }}</x-slot>{{ $bio }}</x-profile>{{ $after }}</div>',
+            "<div>@component('components.profile')@slot('title'){{ \$title }}@endslot{{ \$bio }}@endcomponent{{ \$after }}</div>",
+            "<div>@component('components.profile')@slot('title', 'Ana page'){{ \$bio }}@endcomponent{{ \$after }}</div>",
+        ] as $template) {
+            $this->assertSame($expected, preg_replace(['/>\s+/', '/\s+</'], ['>', '<'], Blade::render($template, $data)), $template);
+        }
+    }
+
+    /** Blade's legacy escaped echo compiles as Blade compiles it, unmarked. */
+    public function testALegacyEscapedEchoCompiles(): void
+    {
+        $this->assertSame('<p>Ana</p>', Blade::render('<p>{{{ $name }}}</p>', ['name' => 'Ana']));
+    }
+
+    /** A tag whose name is printed is a tag, not text. */
+    public function testAPrintedTagNameIsATag(): void
+    {
+        $this->assertSame(
+            '<div><h2 class="title">Hello <!--ls:name-->Ana<!--/ls--></h2></div>',
+            Blade::render('<div><{{ $tag }} class="title">Hello {{ $name }}</{{ $tag }}></div>', ['tag' => 'h2', 'name' => 'Ana'])
+        );
     }
 
     public function testBladesOwnEscapingIsKept(): void

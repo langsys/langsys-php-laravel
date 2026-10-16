@@ -37,6 +37,7 @@ class NoCredentialsTest extends TestCase
         $router->middleware(['web', 'langsys.locale', 'langsys.translate-page', 'langsys.flush'])->get('/pricing', fn () => Blade::render('<p>{{ __(\'Hello :name\', [\'name\' => \'Ana\']) }}</p><p>@lang(\'messages.welcome\', [\'name\' => \'Ana\'])</p>'));
         $router->middleware('api')->post('/api/cards', fn (Request $request) => $request->validate(['cc_number' => 'required']));
         $router->middleware(['web', 'langsys.locale'])->get('/ping', fn () => response()->json(['ok' => true]));
+        $router->middleware('api')->get('/api/forbidden', fn () => abort(403, __('Save')));
     }
 
     protected function setUp(): void
@@ -144,6 +145,12 @@ class NoCredentialsTest extends TestCase
         Log::shouldHaveReceived('debug')->once()->withArgs(fn (string $message) => str_contains($message, 'LANGSYS_API_KEY'));
     }
 
+    /** With no key a page is Laravel's own HTML: no value is marked, so an app's own assertions on its pages hold. */
+    public function testAPageIsLaravelsOwnHtml(): void
+    {
+        $this->assertSame('<p>Hello Ana</p>', Blade::render('<p>Hello {{ $name }}</p>', ['name' => 'Ana']));
+    }
+
     /**
      * WIRE-4: outside Laravel's translator the facade asks the core directly, and the core's client
      * without credentials renders the source with its values filled. Its one warning per process
@@ -155,6 +162,59 @@ class NoCredentialsTest extends TestCase
 
         try {
             $this->assertSame('Hello Ana', Langsys::translate('Hello {name}', null, ['name' => 'Ana'], 'es-ES'));
+        } finally {
+            ini_set('error_log', (string) $log);
+        }
+    }
+
+    /** The core's reference lists are empty without a key, so a form that offers them still renders. */
+    public function testTheFacadesReadsListNothing(): void
+    {
+        $log = ini_set('error_log', '/dev/null');
+
+        try {
+            $this->assertSame([], Langsys::getCurrencies());
+            $this->assertSame([], Langsys::getCountries('es-ES'));
+            $this->assertSame([], Langsys::getDialCodes());
+            $this->assertSame([], Langsys::getLocalesFormat('flat'));
+        } finally {
+            ini_set('error_log', (string) $log);
+        }
+    }
+
+    /**
+     * A test's own fake client, bound with credentials it never sends, is asked even where the
+     * config has none: the app's tests translate through it.
+     */
+    public function testABoundClientWithCredentialsIsAsked(): void
+    {
+        $fake = new \Langsys\Laravel\Tests\Fakes\FakeClient();
+        $fake->seed('es-ES', '__uncategorized__', ['Pay now' => 'Pagar ahora']);
+        $this->app->instance(Client::class, $fake);
+        $this->app->setLocale('es-ES');
+
+        $this->assertSame('Pagar ahora', __('Pay now'));
+    }
+
+    /**
+     * A client the app built itself, through the facade, has no key either, so it changes nothing:
+     * the pages, a failed form, a JSON error, the Inertia seed and Blade stay Laravel's own.
+     */
+    public function testAClientTheFacadeBuiltChangesNothing(): void
+    {
+        $log = ini_set('error_log', '/dev/null');
+
+        try {
+            Langsys::getCountries();
+            $this->assertTrue($this->app->resolved(Client::class), 'Control: the facade built a client.');
+            $reported = $this->_reported();
+
+            $this->get('/pricing?locale=es-ES')->assertOk()->assertSee('<p>Hello Ana</p><p>Welcome back, Ana</p>', false);
+            $this->postJson('/api/cards', [])->assertStatus(422);
+            $this->getJson('/api/forbidden')->assertStatus(403)->assertJsonPath('message', 'Save changes');
+            $this->assertSame(['langsys' => ['initialTranslations' => null, 'initialTranslationsLocale' => null]], InertiaSsrProps::share('es-ES'));
+            $this->assertSame('<p>Hello Ana</p>', Blade::render('<p>Hello {{ $name }}</p>', ['name' => 'Ana']));
+            $this->assertSame([], $reported->getArrayCopy(), 'Nothing reported.');
         } finally {
             ini_set('error_log', (string) $log);
         }
@@ -185,6 +245,7 @@ class NoCredentialsTest extends TestCase
             '__()'       => fn () => __('Save'),
             'Inertia'    => fn () => InertiaSsrProps::share(),
             'validation' => fn () => Validator::make([], ['name' => 'required'])->fails(),
+            'a read'     => fn () => Langsys::getCurrencies(),
         ] as $use => $call) {
             try {
                 $call();

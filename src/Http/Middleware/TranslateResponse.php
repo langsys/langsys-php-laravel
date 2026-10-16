@@ -55,13 +55,13 @@ class TranslateResponse
 
         // translatePage() resolves the locale from the client rather than an
         // argument, and returns the HTML untouched when it is null. Set it
-        // explicitly from the app locale — the same value LangsysTranslator
-        // uses — so this middleware and `@t` can never disagree about which
-        // language a page is in, and so we never fall through to
+        // explicitly to the locale this request is served in — the value
+        // LangsysTranslator uses — so this middleware and `@t` never disagree
+        // about which language a page is in, and so it never falls through to
         // Client::getLocale(), which auto-detects from $_SERVER and can
         // trigger an HTTP call for the project's base locale.
         $client = $this->app->make(Client::class);
-        $client->setLocale(app()->getLocale());
+        $client->setLocale(ClientState::locale());
 
         // Served as returned. translatePage() never throws and hands back the
         // source HTML on every degraded path (WIRE-4), so a guard here would be

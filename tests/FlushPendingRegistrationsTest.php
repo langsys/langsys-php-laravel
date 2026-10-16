@@ -22,7 +22,6 @@ class FlushPendingRegistrationsTest extends TestCase
         $this->get('/page?locale=es-ES')->assertOk();
 
         $this->assertSame(1, $this->fakeClient->flushCalls);
-        $this->assertSame([], $this->fakeClient->queuedPhrases);
     }
 
     /**

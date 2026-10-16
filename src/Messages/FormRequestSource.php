@@ -21,7 +21,8 @@ use Throwable;
  * Every validation message the application's FormRequests can send, listed from the code (MSG-7):
  * each rule of each FormRequest a route's controller action takes, built by `ValidatorMessages`
  * exactly as a failing request builds it. What cannot be listed ahead of time is reported with its
- * fix; until it is fixed it is shown in the source language, since nothing registers at runtime.
+ * fix; until it is fixed it is shown in the source language, since a validation message never
+ * registers at runtime.
  */
 final class FormRequestSource implements MessageSource
 {
@@ -30,6 +31,9 @@ final class FormRequestSource implements MessageSource
 
     /** Rules whose `:value` Laravel fills from the other field's data, which is the rule's second parameter when it fails. */
     private const VALUE_FROM_DATA = ['accepted_if', 'declined_if', 'missing_if', 'present_if', 'prohibited_if', 'required_if'];
+
+    /** Rules comparing a field with another field's size. */
+    private const COMPARED = ['gt', 'gte', 'lt', 'lte'];
 
     /** @param  list<class-string<FormRequest>>  $classes */
     public function __construct(private readonly array $classes)
@@ -68,6 +72,21 @@ final class FormRequestSource implements MessageSource
     }
 
     public function collect(MessageCatalog $catalog)
+    {
+        // Every template is source text: the labels, Laravel's lines and a rule object's message are
+        // read in the language the app is written in, whatever the console's locale.
+        $translator = app('translator');
+        $locale = $translator->getLocale();
+        $translator->setLocale(config('app.fallback_locale'));
+
+        try {
+            $this->_collect($catalog);
+        } finally {
+            $translator->setLocale($locale);
+        }
+    }
+
+    private function _collect(MessageCatalog $catalog): void
     {
         foreach ($this->classes as $class) {
             $source = class_basename($class);
@@ -158,20 +177,28 @@ final class FormRequestSource implements MessageSource
                 continue;
             }
 
-            if (in_array($snake, self::VALUE_FROM_DATA, true) && isset($parameters[0], $parameters[1])) {
-                $data = array_replace_recursive($data, Arr::undot([$parameters[0] => $parameters[1]]));
+            // A conditional rule writes the other field's value into its sentence, so each value it
+            // names is a sentence of its own: `required_if:type,business,nonprofit` is two. A size
+            // rule naming another field reads as that field's label while it is empty and as a
+            // number once it holds one: `gt:deposit` is two as well.
+            $values = match (true) {
+                in_array($snake, self::VALUE_FROM_DATA, true) && isset($parameters[0], $parameters[1]) => array_slice($parameters, 1),
+                in_array($snake, self::COMPARED, true) && isset($parameters[0]) && !is_numeric($parameters[0]) => [null, 1],
+                default => [null],
+            };
+
+            foreach ($values as $value) {
+                $seeded = $value === null ? $data : array_replace_recursive($data, Arr::undot([$parameters[0] => $value]));
+                $entry = ValidatorMessages::forRule($make($seeded), $attribute, $name, $parameters);
+
+                if ($entry === null) {
+                    $catalog->problem($source, "uses the rule '$snake', which Laravel ships no message for", 'give it a message in messages()', $field);
+
+                    continue 2;
+                }
+
+                $catalog->add($entry->getTemplate(), $source, $field);
             }
-
-            $validator = $make($data);
-            $entry = ValidatorMessages::forRule($validator, $attribute, $name, $parameters);
-
-            if ($entry === null) {
-                $catalog->problem($source, "uses the rule '$snake', which Laravel ships no message for", 'give it a message in messages()', $field);
-
-                continue;
-            }
-
-            $catalog->add($entry->getTemplate(), $source, $field);
         }
     }
 

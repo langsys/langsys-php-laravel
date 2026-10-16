@@ -8,16 +8,17 @@ use Langsys\SDK\Locale\LocaleDetector;
 /**
  * In-memory Client double. The SDK's HTTP layer is hand-rolled cURL with no
  * injection seam, so tests bind this into the container instead of stubbing
- * HTTP. Seed translations per locale/category, then assert on the recorded
- * queue and flush calls.
+ * HTTP. Seed translations per locale/category, then assert on what it was
+ * asked and on its flush calls. Built as the provider builds the client, it
+ * registers nothing while serving (FRM-2).
  */
 class FakeClient extends Client
 {
     /** @var array<string, array<string, array<string, string>>> locale => category => phrase => translation */
     public array $seededTranslations = [];
 
-    /** @var list<array{phrase: string, category: string}> */
-    public array $queuedPhrases = [];
+    /** @var list<string> Every phrase this client was asked for, through translate(), resolve() or translateRich(). */
+    public array $asked = [];
 
     /** @var list<array{html: string, category: ?string, locale: ?string}> */
     public array $translatedPages = [];
@@ -58,15 +59,17 @@ class FakeClient extends Client
     }
 
     /**
-     * Mirrors the real Client's contract, including the v1.0.0 $params
-     * argument: registration queues the RAW placeholder-bearing phrase, and
-     * only the returned string is interpolated — so one catalog entry serves
-     * every runtime value. Interpolation itself runs through the inherited
-     * SDK interpolator rather than a hand-rolled one, so this fake cannot
-     * drift from the behavior it stands in for.
+     * Mirrors the real Client's contract, including its $params
+     * argument: the RAW placeholder-bearing phrase is what is looked up, and
+     * only the returned string is interpolated, so one catalog entry serves
+     * every runtime value.
+     * Interpolation itself runs through the inherited SDK interpolator rather
+     * than a hand-rolled one, so this fake cannot drift from the behavior it
+     * stands in for.
      */
     public function translate($phrase, $locale = null, $category = '__uncategorized__', $contentBlockId = null, array $params = [])
     {
+        $this->asked[] = $phrase;
         $locale = $locale !== null ? LocaleDetector::normalize($locale) : $this->getLocale();
         $category = $this->normalizeCategory($category);
 
@@ -80,9 +83,21 @@ class FakeClient extends Client
             return $this->getInterpolator()->interpolate($translation, $params, $locale);
         }
 
-        $this->queuedPhrases[] = ['phrase' => $phrase, 'category' => $category];
-
         return $this->getInterpolator()->interpolate($phrase, $params, $locale);
+    }
+
+    public function resolve($phrase, $locale = null, $category = '__uncategorized__', array $params = [])
+    {
+        $this->asked[] = $phrase;
+
+        return parent::resolve($phrase, $locale, $category, $params);
+    }
+
+    public function translateRich($sourceHtml, $locale = null, $category = '__uncategorized__', array $params = [])
+    {
+        $this->asked[] = $sourceHtml;
+
+        return parent::translateRich($sourceHtml, $locale, $category, $params);
     }
 
     /**
@@ -103,17 +118,10 @@ class FakeClient extends Client
         return str_replace('Save', 'Guardar', $html);
     }
 
-    public function hasPendingRegistrations()
-    {
-        return $this->queuedPhrases !== [];
-    }
-
     public function flushPendingRegistrations()
     {
         $this->flushCalls++;
-        $flushed = count($this->queuedPhrases);
-        $this->queuedPhrases = [];
 
-        return ['phrases' => $flushed, 'content_blocks' => 0, 'success' => true];
+        return ['phrases' => 0, 'content_blocks' => 0, 'success' => true];
     }
 }

@@ -11,10 +11,13 @@ use Inertia\Inertia;
 use Langsys\Laravel\Messages\HasServerMessages;
 use Langsys\Laravel\Support\ClientState;
 use Langsys\Laravel\Support\RequestLocaleWiring;
+use Langsys\Laravel\Translation\CatalogTranslator;
 use Langsys\SDK\Client;
+use Langsys\SDK\Exception\ConfigurationException;
 use Langsys\SDK\Locale\LocaleDetector;
 use Langsys\SDK\Messages\ServerMessage;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Puts the entries of a failed validation beside Laravel's own error body (MSG-1).
@@ -43,7 +46,7 @@ class AttachServerMessages
         // No key: the error envelope is the application's own, and it composes its entries from
         // the validator's serverMessages() itself.
         if ($key === null || $key === '') {
-            return self::_namesItsLanguage($next($request));
+            return self::_namesItsLanguage($request, $next($request));
         }
 
         $flashed = $request->hasSession() ? $request->session()->get($key) : null;
@@ -56,7 +59,7 @@ class AttachServerMessages
         $messages = $this->_messages($response);
 
         if ($messages === []) {
-            return self::_namesItsLanguage($response);
+            return self::_namesItsLanguage($request, $response);
         }
 
         if ($response instanceof JsonResponse) {
@@ -79,26 +82,53 @@ class AttachServerMessages
     }
 
     /**
-     * FRM-5: any JSON error body's `message` — a 403, a 404, `abort()` — was written by `__()` in the
-     * locale this request rendered in, so the response names it, as the validation path does. A
-     * response that already names its language is the application's.
+     * FRM-5 beyond a validation failure: a JSON body whose `message` `__()` wrote this request — a
+     * 403 or an `abort()` with a translated reason — names the language that text is in, as the
+     * validation path does: the served locale for a catalog translation, Laravel's for the app's
+     * own line, the project's base for the source. A `message` nothing translated, such as
+     * Laravel's own wording or an exception's text, is in no language this package knows and is
+     * not named, and a response that names its own language is the application's.
      */
-    private static function _namesItsLanguage(Response $response): Response
+    private static function _namesItsLanguage(Request $request, Response $response): Response
     {
-        if ($response instanceof JsonResponse && !$response->headers->has('Content-Language') && ClientState::buildable()) {
-            $data = $response->getData(true);
+        if (!$response instanceof JsonResponse || $response->headers->has('Content-Language') || !ClientState::buildable()) {
+            return $response;
+        }
 
-            if (is_array($data) && is_string($data['message'] ?? null)) {
-                $response->headers->set('Content-Language', LocaleDetector::normalize(app()->getLocale()));
-            }
+        $data = $response->getData(true);
+        $written = (array) $request->attributes->get(CatalogTranslator::WRITTEN, []);
+
+        if (!is_array($data) || !is_string($data['message'] ?? null) || !array_key_exists($data['message'], $written)) {
+            return $response;
+        }
+
+        $locale = $written[$data['message']] ?? self::_baseLocale();
+
+        if ($locale !== null) {
+            $response->headers->set('Content-Language', LocaleDetector::normalize($locale));
         }
 
         return $response;
     }
 
+    /** The language the source is written in: the project's base locale, when the core can say. */
+    private static function _baseLocale(): ?string
+    {
+        try {
+            $base = app(Client::class)->getProject()['base_locale'] ?? null;
+        } catch (ConfigurationException $e) {
+            // `require_credentials` asked for a missing key to fail the request, not to degrade it.
+            throw $e;
+        } catch (Throwable) {
+            return null;
+        }
+
+        return is_string($base) && $base !== '' ? $base : null;
+    }
+
     /**
      * FRM-5: a JSON response is read by a client that may have no SDK, so each entry's `message` is
-     * in the request's language — the locale the app resolved when it resolved one (SRV-6), else
+     * in the request's language — the locale it is served in when one was resolved (SRV-6), else
      * Accept-Language negotiated against the project's locales — beside the `template` and `params`
      * an SDK renders itself. The core negotiates and translates; the headers go on Laravel's own
      * response. A redirect's entries stay source: the page they reach has its own SDK (FRM-4).
@@ -115,7 +145,7 @@ class AttachServerMessages
 
         $client = app(Client::class);
         $choice = $request->attributes->get(DetectLocale::RESOLVED) === true
-            ? $client->resolveRequestLocale(['framework' => app()->getLocale()], ['send_vary' => false])
+            ? $client->resolveRequestLocale(['framework' => ClientState::locale()], ['send_vary' => false])
             : $client->resolveRequestLocale(['accept_language' => $request->header('Accept-Language')], RequestLocaleWiring::headerOnly());
         $locale = $choice['locale'];
 

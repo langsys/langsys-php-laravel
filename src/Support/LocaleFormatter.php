@@ -8,10 +8,13 @@ use Locale;
  * Canonical BCP 47 casing for Laravel's own locale store:
  * 'es-es' / 'pt_br' → 'es-ES' / 'pt-BR', 'zh-hant-tw' → 'zh-Hant-TW'.
  *
- * Only DetectLocale uses it, for app()->setLocale(). Nothing handed to a
- * Langsys SDK goes through it: both the PHP and the JS SDK identify a locale
- * by lowercase `xx-yy` (WIRE-3), so every SDK boundary uses
- * LocaleDetector::normalize() instead.
+ * DetectLocale uses it for the locale it keeps in the session or the cookie,
+ * which a later request reads back as it would any locale, and for
+ * app()->setLocale() where the app's own `lang/` has no spelling of its own for
+ * the locale. Both the PHP and the JS SDK identify a locale by lowercase `xx-yy`
+ * (WIRE-3): the core normalizes every spelling it is handed, and where the
+ * binding hands a locale to another SDK or the wire it writes that form with
+ * LocaleDetector::normalize().
  */
 class LocaleFormatter
 {

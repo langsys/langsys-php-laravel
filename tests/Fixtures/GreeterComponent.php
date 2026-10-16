@@ -7,8 +7,8 @@ use Livewire\Component;
 /**
  * A minimal Livewire component exercising the Langsys integration inside the
  * Livewire lifecycle: `__()` in the inline Blade view (with interpolation), and a
- * second phrase that only appears after an interaction — used to prove token
- * discovery happens on a Livewire UPDATE, not just the initial page render.
+ * second phrase that only appears after an interaction — used to prove a phrase
+ * a Livewire UPDATE renders is served and registers nothing at runtime.
  */
 class GreeterComponent extends Component
 {

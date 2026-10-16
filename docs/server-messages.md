@@ -16,11 +16,11 @@ How this package carries Laravel's validation messages and its `__()` translatio
 
 Installing the package is enough (FRM-1). Laravel's own translate function — `__()`, `trans()`, `trans_choice()` and `@lang` — is answered by Langsys, and nothing about how the app calls it changes. `t()` is `__()` by another name.
 
-- **`__()` resolves the catalog, then your lang files, then the source** (FRM-3). A key resolves to its line in your base-language files first (§3.2). With nothing in the catalog, the answer is exactly what Laravel gives without this package. Nothing registers while serving a request: `langsys:sync` does (§6).
+- **`__()` resolves the catalog, then your lang files, then the source** (FRM-3). A key resolves to its line in your base-language files first (§3.2). With nothing in the catalog, the answer is exactly what Laravel gives without this package. `__()` registers nothing while serving a request, apart from a sentence built from a declared value the last sync did not see: `langsys:sync` registers (§6).
 - **Validation failures carry entries** built from the rule that failed, with the label written in, beside Laravel's own error body (§3.1, §5).
 - **What `__()` returns depends on the response** (FRM-4), read from Laravel's own structure. A page the server renders gets the translation. An Inertia page — Inertia's middleware on the route, or an Inertia visit — gets the source, because its own browser SDK translates it. A notification is always translated, in the recipient's `preferredLocale()`, even when sent while serving an Inertia page, and from a queued job too. `langsys.response_kinds` names the kind for a route group yourself: `auto`, `server` or `client`.
 
-**One switch turns it all off, for debugging:** `LANGSYS_ENABLED=false`. Off, nothing of this package is installed — Laravel's own translator and validator, and a 422 body with nothing of ours.
+**One switch turns it all off, for debugging:** `LANGSYS_ENABLED=false`. Off, Laravel answers as it would without this package — its own translator and validator, a 422 body with nothing of ours, and the package's middleware on your routes does nothing.
 
 **`__()` and automatic mode (`TranslateResponse`) do not run together.** The page walk would meet text `__()` already translated, look the translation up as a source phrase, miss, and register it. A project using the page walk turns it on only for routes that do not translate through `__()`.
 
@@ -34,7 +34,7 @@ Every entry carries its source `template` and its `params`, so a client SDK look
 - **A JSON response** is read by any client, with an SDK or without one. Each entry's `message` is in the request's language — the locale the app resolved, or Accept-Language negotiated against the locales the project serves — and the response carries `Content-Language`, and `Vary: Accept-Language` when the SDK negotiated. With no match, or no translation, `message` is the source.
 - **A redirect**, and the Inertia prop it becomes, carries the source fill: the page it reaches has its own SDK.
 
-Laravel's own text — the message bag, `$errors`, the 422 body's `message` and `errors` — stays as Laravel wrote it, in the source language.
+Laravel's own text — the message bag, `$errors`, the 422 body's `message` and `errors` — stays as Laravel renders it, from the app's own validation lines for the locale.
 
 ### 3.1 Validation messages — MSG-9, MSG-10, MSG-11
 
@@ -43,7 +43,7 @@ Laravel's own text — the message bag, `$errors`, the 422 body's `message` and 
 **The subclass turns each failure into an entry from the rule that failed**, its parameters and the attribute. It never reads text Laravel already rendered (MSG-9):
 
 1. **Label** (MSG-10). Laravel's own label concept, `getDisplayableAttribute()`: FormRequest `attributes()`, the fourth argument of `Validator::make()`, `setAttributeNames()` — in a request's or laravel-data DTO's `withValidator()` too, which the listing runs as Laravel does — and Laravel's derived name when none is declared.
-2. **Wording.** A custom message wins, as in Laravel: FormRequest `messages()`, or the inline messages argument. Otherwise it is **Laravel's own line** for the rule, read in the source language from the installed framework's `validation.php`, size variants included (`min.string`, `min.numeric`, `min.array`, `min.file`).
+2. **Wording.** A custom message wins, as in Laravel: FormRequest `messages()`, or the inline messages argument. Otherwise it is **Laravel's own line** for the rule, read in the source language through Laravel's translator — your `lang/<source>/validation.php` where you have one, else the framework's — size variants included (`min.string`, `min.numeric`, `min.array`, `min.file`).
 3. **Template** (MSG-3, MSG-11). For each of Laravel's validation rules, a table in this package says what each placeholder in its line stands for:
 
    | Placeholder | Becomes | Why |
@@ -56,7 +56,7 @@ Laravel's own text — the message bag, `$errors`, the 422 body's `message` and 
 
    Laravel's own replacer then fills everything that is left, so the label and any written-in value are exactly what Laravel prints, and filling the template again reproduces Laravel's message byte for byte. A test fails when the installed Laravel ships a rule or placeholder the table does not classify, so an upgrade cannot send an unclassified message.
 4. **Code** (MSG-2). Laravel's own name for the rule that failed, passed through: `required`, `min`, `required_if`, the rule as written and as `validation.php` keys it. It does not change with the field's type or the side of a bound. A rule object or closure fails under the class Laravel records it by, and that class is its code.
-5. **Entry.** `ServerMessage::make($code, $template, $params, $field)` from the core, with `$field` Laravel's dotted attribute. `$client->emitMessage($entry)` renders it. Registration is sync's (§6); the one exception is a sentence built from a declared value the last sync did not see, sent after the response (FRM-7, MSG-8).
+5. **Entry.** `ServerMessage::make($code, $template, $params, $field)` from the core, with `$field` Laravel's dotted attribute. `$client->emitMessage($entry)` tells the core it is sent, and the core warns when a marker carries a value its catalog translates (MSG-11). Registration is sync's (§6): an entry never registers while a request is served.
 
 **Rule objects** have no line of Laravel's. One that implements the core's `HasMessageTemplate` states its sentence: `template()` returns it with `:attribute` for the label and a `{name}` marker for each value, filled from the rule's public property of the same name, and the entry is that template with the label written in and those params (FRM-2). Any other rule object, and a closure, has only the text it produced, with the label written in by Laravel, one entry per `$fail()`. **`ValidationException::withMessages()`** carries text and no rule: its text is the template, and the entry carries no code, because Laravel has none for it (MSG-2, MSG-9).
 
@@ -67,9 +67,9 @@ Laravel's `translator` is this package's subclass, built lazily so that resolvin
 1. **The source line.** The application's source-language files — `lang/{locale}.json` and `lang/{locale}/*.php` in `app.fallback_locale` — hold the source. A key resolves to its line there, in the order Laravel reads: the app's JSON, then its groups; the framework's bundled English and any package JSON path only for what the app does not define; a package's `lang/vendor/{namespace}` override ahead of the package's own files. JSON files are declared in Laravel's format, since the core would otherwise read JSON as plain text. Resolution, conversion and interpolation are the core's (`Client::resolve()`); the package hands it the file list.
 2. **The phrase is the line, never the key** (MIG-3). Laravel's `:name` becomes `{name}`, and a `|` plural whose forms carry `:count` becomes one ICU plural over `count`, so the phrase is the one every Langsys SDK renders. A line the conversion does not recognise — `:Name`, a range with no exact equivalent — is registered as written, with a warning.
 3. **The category is the group:** `messages.welcome` registers under `messages`, `courier::notices.sent` under `notices`.
-4. **Translation.** The phrase is looked up in the catalog in the request locale. On a miss, the app's own lang-file line for that locale answers, else the source line, filled (FRM-3). Nothing registers: `langsys:sync` does (§6).
+4. **Translation.** The phrase is looked up in the catalog in the request locale. On a miss, the app's own lang-file line for that locale answers, else the source line, filled (FRM-3). Nothing registers, apart from a sentence built from a declared value the last sync did not see: `langsys:sync` registers (§6).
 5. **A sentence passed as its own key** is literal source text, converted as the Laravel call that received it reads it (MIG-2). `__('Hello :name', ['name' => $n])` registers `Hello {name}`, the phrase every Langsys SDK looks up. A `:word` the call does not pass (`__('Note:done')`) and a `|` through `__()` print as written in Laravel, so they register as written. `trans_choice(':count item|:count items', $n)` reads the `|` as a plural and registers the ICU plural. `:Name` and `:NAME` register as written, with a warning.
-6. **A package key no file holds** returns the key and registers nothing. **An application key no file holds** is literal text, logged at debug, so a mistyped or deleted key is visible.
+6. **A package key no file holds** returns the key and registers nothing. **An application key no file holds** is literal text and prints as written, as in Laravel, so a mistyped or deleted key shows on the page.
 7. **Replacements** travel as params and fill the phrase's `{name}` markers after translation. They carry values — a name, a count — never translatable text.
 8. **Validation lines** never go through this path. Laravel's translator keeps answering `validation.*`, which is where §3.1 reads its lines.
 
@@ -91,7 +91,7 @@ Laravel's `translator` is this package's subclass, built lazily so that resolvin
 
 An entry is the core's: `{field?, code?, message, template, params?}`. The error body around it stays Laravel's own.
 
-- **JSON 422.** `{message, errors}` keeps its shape and its source-language text. The entries go beside them, each `message` in the request's language (§3.0), under `langsys.messages.response_key`, default `langsys_errors`, and `langsys.messages.pieces` renames an entry's pieces for a client that expects other names. A response middleware, appended to the `web` and `api` groups, reads the `ValidationException` Laravel's pipeline attaches to the response and takes the entries from its validator.
+- **JSON 422.** `{message, errors}` keeps its shape and the text Laravel renders. The entries go beside them, each `message` in the request's language (§3.0), under `langsys.messages.response_key`, default `langsys_errors`, and `langsys.messages.pieces` renames an entry's pieces for a client that expects other names. A response middleware, appended to the `web` and `api` groups, reads the `ValidationException` Laravel's pipeline attaches to the response and takes the entries from its validator.
 - **Redirects.** A form that fails and redirects flashes its entries to the session under the same key, beside Laravel's own `errors` bag.
 - **An API with its own error envelope** sets `langsys.messages.response_key` empty. Nothing is attached or flashed; its exception handler reads the entries from the `ValidationException`'s validator, which implements `Langsys\Laravel\Messages\HasServerMessages`, and puts each `message` in the request's language with `Client::translateMessage()`. `Langsys\Laravel\Support\ClientState::buildable()` says whether a client can be had — with no key it cannot, and the entries keep their source `message`:
 
@@ -111,7 +111,7 @@ System messages — `abort()`, authorization and HTTP exceptions — carry no en
 
 ## 6. Sync — FRM-2, MSG-7
 
-`php artisan langsys:sync [--dry-run] [--strict] [--watch] [-v]` is the one way anything is registered. It reads every literal `__()`, `trans()`, `trans_choice()`, `@lang` and `t()` in the app's PHP and Blade — Blade compiled by Laravel's own compiler, each hit's line found again in the view — and every line of the base-language files, Laravel's own bundled English included. For each phrase:
+`php artisan langsys:sync [--dry-run] [--strict] [--watch] [-v]` is how the app's phrases are registered. It reads every literal `__()`, `trans()`, `trans_choice()`, `@lang` and `t()` in the app's PHP and Blade — Blade compiled by Laravel's own compiler, each hit's line found again in the view — and every line of the base-language files, Laravel's own bundled English included. For each phrase:
 
 - **in the catalog** — nothing;
 - **in the lang files, not the catalog** — registered with the translations the other locales' files already have, in one call, so work already done is kept (MIG-9);
@@ -121,7 +121,7 @@ A call whose argument is not a literal is reported with its file and line; one t
 
 Messages your app defines itself — an API error, a notice — implement the core's `HasAppMessageTemplate`: `template()` returns the sentence with a `{name}` marker per value, named after the public property that holds it, and `code()` its identifier. Those in app/ are found without listing them, `langsys.messages.classes` adds classes kept elsewhere, and a backed enum lists each case. Each is listed once under the messages category with its code, and the `__()` that states it — or any literal whose sentence the listing lists — is not registered again as a bare phrase. Send one with `ServerMessage::fromApp($error)`.
 
-`--dry-run` lists without registering. `--strict` exits 1 on any call it could not register ahead of time, for CI. `--watch` syncs again whenever a scanned file or lang file changes, for development. `langsys.sync_paths` replaces the directories it reads (app/, routes/, resources/views/). `php artisan langsys:messages` lists the validation messages alone, and reports what cannot be listed. A field with no declared label is named as advice, with the name Laravel prints for it (MSG-10): advice is printed apart and never fails the build, `--strict` included.
+`--dry-run` lists without registering. `--strict` exits 1 on any call it could not register ahead of time, for CI. `--watch` syncs again whenever a scanned file or lang file changes, for development; a PHP class and the routes are read once per run, so after editing a form request, an app message, a value set or a routes file, run it again. `langsys.sync_paths` replaces the directories it reads (app/, routes/, resources/views/). `php artisan langsys:messages` lists the validation messages alone, and reports what cannot be listed. A field with no declared label is named as advice, with the name Laravel prints for it (MSG-10): advice is printed apart and never fails the build, `--strict` included.
 
 ## 7. Known limits
 
@@ -218,7 +218,7 @@ Write each translatable variant as its own sentence instead — `The invoice was
 
 ### Step 7 — Check your plurals and capitalised placeholders
 
-`trans_choice('messages.apples', $n)` with `:count apple|:count apples` becomes `{count, plural, one {# apple} other {# apples}}`, and `{0}` / `[1,*]` ranges map to exact counts and categories where they cover every number. A form with no ICU equivalent — `:Name` or `:NAME`, a range that skips a number — is registered as written and warned about in your log. Rewrite those lines: `:Name` as `{name}` with the value capitalised by your code, a plural as ICU.
+`trans_choice('messages.apples', $n)` with `:count apple|:count apples` becomes `{count, plural, one {# apple} other {# apples}}`, and `{0}` / `[1,*]` ranges map to exact counts and categories where they cover every number. A form with no ICU equivalent — `:Name` or `:NAME`, a range that skips a number — is registered as written and warned about in PHP's error log, where the core logs. Rewrite those lines: `:Name` as `{name}` with the value capitalised by your code, a plural as ICU.
 
 ### Step 8 — Register ahead of time
 
@@ -236,13 +236,13 @@ Every line in your lang files brings its translations with it: `langsys:sync` re
 
 The package has been answering since it was installed. Run your test suite. Then check one failing form in the browser, and one failing JSON request:
 
-- The 422 body still has `message` and `errors` in your source language, plus `langsys_errors` entries whose `message` is in the request's language.
+- The 422 body still has `message` and `errors` as Laravel renders them from your own validation lines, plus `langsys_errors` entries whose `message` is in the request's language.
 - A redirecting form still shows `$errors` in Blade.
 - An Inertia page receives `langsys_errors` as a prop.
 
 ### Step 11 — Delete the other locales' files
 
-Once the catalog holds their translations (step 9), the other locales' files are only a fallback. Delete them when you no longer want it, keeping your source language's, which your keys still resolve through (step 5). `validation.php` can go too: validation sentences are built from the rule that failed. **To roll back:** restore it from git and set `LANGSYS_ENABLED=false`.
+Once the catalog holds their translations (step 9), the other locales' files are only a fallback. Delete them when you no longer want it. Keep your source language's: your keys still resolve through them (step 5), and its `validation.php`, where you have one, is the wording of every validation template. **To roll back:** restore them from git and set `LANGSYS_ENABLED=false`.
 
 ### What you don't have to change
 

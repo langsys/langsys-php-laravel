@@ -9,6 +9,14 @@
 - **The matching `langsys/langsys-php` release.** Composer installs it with this package.
 - PHP 8.1+, Laravel 10, 11 or 12, and `ext-intl`, as in 1.x.
 
+### Blade marks the values it prints
+
+With a key configured, a value Blade prints in text is wrapped in a comment pair, `<!--ls:name-->Ana<!--/ls-->`, so a browser SDK or the page walk reads `Hello {name}` as one phrase. A test asserting on raw HTML that spans a printed value, `assertSee('Hello Ana')`, sees the markers; `assertSeeText()` reads the text. With no key, as in most test suites, nothing is marked.
+
+### Clear compiled views once
+
+Blade keeps a compiled view until its template changes, and a view compiled before the upgrade prints `@lang` the 1.x way. Run `php artisan view:clear` once after upgrading.
+
 ### `t()` and `@t` are `__()` and `@lang`
 
 In 1.x, `t($phrase, $category, $params, $locale)` took a Langsys phrase with `{name}` placeholders and a category. In 2.0, `t()` is `__()` by another name — `t($key, $replace, $locale)` — and `@t` is `@lang`.
@@ -24,12 +32,12 @@ __('Hello :name!', ['name' => $user->name]);
 - **Placeholders are Laravel's.** Write `:name`; Langsys registers and looks up `{name}`, the same phrase every Langsys SDK uses.
 - **Plurals are Laravel's.** `trans_choice(':count item|:count items', $n)` becomes one ICU plural over `count`.
 - **Categories come from groups.** A key's group is its category: put context-dependent phrases in a lang group file (`lang/en/menu.php` → `__('menu.home')`) and they are registered and looked up under that group. A sentence passed as its own key has no category. A 1.x phrase registered under a category is a different catalog entry from the same sentence with none, so it is translated again unless you move it into the matching group.
-- **Escaping.** `@lang` and `@t` escape catalog text and rebuild a line with inline markup from the source's own elements; text from your own lang files prints as Laravel prints it. `{{ __() }}` escapes everything.
+- **Escaping.** `@lang`, `@t` and `@choice` escape catalog text and rebuild a line with inline markup from the source's own elements; text from your own lang files prints as Laravel prints it. `{{ __() }}` escapes everything.
 - **Outside Laravel's translator**, `Langsys::translate($phrase, $category, $params)` still looks a phrase up under a category, as 1.x's `t()` did. `langsys:sync` does not read those calls.
 
 ### Registration happens in `langsys:sync`, not at runtime
 
-In 1.x, a write key registered every phrase a page rendered that the catalog lacked, after the response. In 2.0, serving a request registers nothing. Run
+In 1.x, a write key registered every phrase a page rendered that the catalog lacked, after the response. In 2.0, serving a request registers nothing through `__()`, apart from a sentence built from a declared value your last sync did not see. Run
 
 ```bash
 php artisan langsys:sync
@@ -43,7 +51,7 @@ Republish the config (`php artisan vendor:publish --tag=langsys-config --force`)
 
 - **Remove `auto_flush` (`LANGSYS_AUTO_FLUSH`).** Under PHP-FPM it never stopped a flush — the SDK sends its queue at shutdown regardless — and what little is queued at runtime in 2.0 is always sent after the response.
 - **Remove `translate_response.cache` (`LANGSYS_TRANSLATE_RESPONSE_CACHE`, `LANGSYS_TRANSLATE_RESPONSE_CACHE_TTL`).** The page walk no longer caches pages: the SDK caches the catalog, and a cached page carried a stale translation for its TTL and was shared between projects on one store.
-- **New keys**, all optional: `enabled` (`LANGSYS_ENABLED`, the one off switch), `require_credentials` (`LANGSYS_REQUIRE_CREDENTIALS`), `response_kinds`, `value_sets`, `sync_paths`, `snapshot` (`LANGSYS_SNAPSHOT`), and `messages` (the validation-message category, response key and piece names).
+- **New keys**, all optional: `enabled` (`LANGSYS_ENABLED`, the one off switch), `require_credentials` (`LANGSYS_REQUIRE_CREDENTIALS`), `response_kinds`, `value_sets`, `sync_paths`, `snapshot` (`LANGSYS_SNAPSHOT`), and `messages` (the validation-message category, response key, piece names and the app-message classes kept outside app/).
 - **A missing key no longer fails.** 1.x threw on the first translation of an app without `LANGSYS_API_KEY` or `LANGSYS_PROJECT_ID`; 2.0 returns what Laravel returns. Where a missing key is a mistake, such as production, set `LANGSYS_REQUIRE_CREDENTIALS=true` to keep the exception: the first use throws the core's `ConfigurationException`, and booting never does.
 
 ### Inertia: the seeded locale is lowercase

@@ -41,15 +41,32 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
+     * Hands Laravel's translator the app's missing-key handler, or answers false on a Laravel with
+     * none: `Lang::handleMissingKeysUsing()` arrived in 10.33, and the lowest-dependencies leg runs
+     * 10.0, where a miss prints the line itself and nothing is told.
+     */
+    protected function missingKeyHandler(\Closure $handler): bool
+    {
+        if (!method_exists(\Illuminate\Translation\Translator::class, 'handleMissingKeysUsing')) {
+            return false;
+        }
+
+        $this->app['translator']->handleMissingKeysUsing($handler);
+
+        return true;
+    }
+
+    /**
      * The real SDK Client for evidence that has to be the SDK's own code path
      * rather than FakeClient's stand-in for it. Catalogs are seeded into the
      * Laravel cache it reads through, and the API base is a closed local port.
      *
      * @param array<string, array<string, array<string, ?string>>> $catalogs locale => category => phrase => translation
+     * @param array<string, mixed> $options constructor options over these, such as the provider's `runtime_registration`
      */
-    protected function offlineClient(array $catalogs = []): RecordingClient
+    protected function offlineClient(array $catalogs = [], array $options = []): RecordingClient
     {
-        $client = new RecordingClient('test-key', 'test-project', [
+        $client = new RecordingClient('test-key', 'test-project', $options + [
             'api_url'                   => self::UNREACHABLE_API,
             'cache'                     => new LaravelCacheAdapter($this->app['cache']->store('array'), 'langsys:', 3600, 'test-project'),
             'warn_runtime_requirements' => false,
