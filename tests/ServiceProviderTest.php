@@ -36,8 +36,25 @@ class ServiceProviderTest extends TestCase
 
     public function testConfigIsMerged(): void
     {
-        $this->assertSame('https://api.langsys.dev/api', config('langsys.api_url'));
+        $this->assertSame(getenv('LANGSYS_API_URL'), config('langsys.api_url'), 'The API is LANGSYS_API_URL, here the closed port phpunit.xml sets.');
         $this->assertSame('langsys:', config('langsys.cache.prefix'));
+    }
+
+    /** An app that sets no LANGSYS_API_URL reaches the production API; read from the shipped file, with the variable unset. */
+    public function testTheShippedApiIsProductionsWhenNoneIsSet(): void
+    {
+        $set = getenv('LANGSYS_API_URL');
+        putenv('LANGSYS_API_URL');
+        unset($_ENV['LANGSYS_API_URL'], $_SERVER['LANGSYS_API_URL']);
+
+        try {
+            $shipped = (require __DIR__ . '/../config/langsys.php')['api_url'];
+        } finally {
+            putenv("LANGSYS_API_URL=$set");
+            $_ENV['LANGSYS_API_URL'] = $_SERVER['LANGSYS_API_URL'] = $set;
+        }
+
+        $this->assertSame('https://api.langsys.dev/api', $shipped);
     }
 
     /**

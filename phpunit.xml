@@ -5,6 +5,10 @@
          colors="true"
          failOnWarning="true"
          failOnRisky="true">
+    <php>
+        <!-- Tests never call the production API: a client built with no URL of its own reaches a closed local port. -->
+        <env name="LANGSYS_API_URL" value="http://127.0.0.1:9" force="true"/>
+    </php>
     <testsuites>
         <testsuite name="Package">
             <directory>tests</directory>

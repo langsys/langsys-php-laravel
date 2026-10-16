@@ -32,7 +32,7 @@ LANGSYS_API_URL=http://langsys2.test/api
 ```
 
 **Check:**
-- With the key commented out, every page still renders exactly as plain Laravel, and `storage/logs` has one debug line naming the missing key.
+- With the key commented out, every page still renders exactly as plain Laravel, and `storage/logs` has one debug line per request naming the missing key (PHP-FPM starts every request afresh; under Octane, one per worker).
 - Add `LANGSYS_REQUIRE_CREDENTIALS=true` as well: `php artisan config:cache` still completes, and the first page that translates anything fails with `API key is required`. Run `php artisan config:clear` afterwards.
 
 ## 2. `langsys:sync`

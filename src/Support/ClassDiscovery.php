@@ -28,7 +28,7 @@ final class ClassDiscovery
         $classes = [];
 
         foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS)) as $file) {
-            if ($file->getExtension() !== 'php' || ($class = self::_declaredClass((string) $file->openFile()->fread(max(1, $file->getSize())))) === null) {
+            if ($file->getExtension() !== 'php' || ($class = self::declaredClass((string) $file->openFile()->fread(max(1, $file->getSize())))) === null) {
                 continue;
             }
 
@@ -50,8 +50,8 @@ final class ClassDiscovery
         return $classes;
     }
 
-    /** The class or enum a file declares, read from its tokens. */
-    private static function _declaredClass(string $code): ?string
+    /** The class or enum a file declares, read from its tokens: the first one, where a file declares several. */
+    public static function declaredClass(string $code): ?string
     {
         $tokens = token_get_all($code);
         $namespace = '';

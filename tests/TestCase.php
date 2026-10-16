@@ -17,7 +17,13 @@ abstract class TestCase extends OrchestraTestCase
      */
     protected const UNREACHABLE_API = 'http://127.0.0.1:9';
 
+    /** The host every Langsys SDK defaults to. Tests never call it: they call the local API or a fake. */
+    private const PRODUCTION_HOST = 'api.langsys.dev';
+
     protected FakeClient $fakeClient;
+
+    /** @var list<string> The production URLs a client was aimed at this test, which fails it. */
+    private array $productionClients = [];
 
     protected function getPackageProviders($app): array
     {
@@ -36,8 +42,44 @@ abstract class TestCase extends OrchestraTestCase
     {
         parent::setUp();
 
+        // Registered before any client exists, so every client the container builds is checked.
+        $this->app->extend(Client::class, fn (Client $client) => $this->offProduction($client));
+
         $this->fakeClient = new FakeClient();
         $this->app->instance(Client::class, $this->fakeClient);
+    }
+
+    /**
+     * Tests never call the production API. A client aimed at it fails the test before it sends
+     * anything; one that needs a server uses the local API (`https://api.langsys2.test/api`) or a
+     * fake. The test fails even where the code under test swallows the exception.
+     */
+    protected function offProduction(Client $client): Client
+    {
+        $url = (string) $client->getConfig()->getApiUrl();
+
+        if (strcasecmp((string) parse_url($url, PHP_URL_HOST), self::PRODUCTION_HOST) === 0) {
+            $this->productionClients[] = $url;
+
+            throw new \LogicException("A test built a Langsys client aimed at the production API ($url). Tests call the local API, https://api.langsys2.test/api, or a fake.");
+        }
+
+        return $client;
+    }
+
+    /** The production URLs a client was aimed at, clearing the record: for the guard's own firing control. */
+    protected function takeProductionClients(): array
+    {
+        [$urls, $this->productionClients] = [$this->productionClients, []];
+
+        return $urls;
+    }
+
+    protected function assertPostConditions(): void
+    {
+        $this->assertSame([], $this->productionClients, 'A Langsys client was aimed at the production API.');
+
+        parent::assertPostConditions();
     }
 
     /**
@@ -75,6 +117,8 @@ abstract class TestCase extends OrchestraTestCase
         foreach ($catalogs as $locale => $catalog) {
             $client->getCache()->set(self::_catalogKey($locale), $catalog);
         }
+
+        $this->offProduction($client);
 
         return $client;
     }

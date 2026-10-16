@@ -45,6 +45,7 @@ class NegotiatedMessageTest extends TestCase
         $router->middleware(['api', 'langsys.locale'])->get('/api/own', fn () => response()->json(['message' => __('Not yours.')], 200, ['Content-Language' => 'fr-fr']));
         $router->middleware(['api', 'langsys.locale'])->get('/api/missing', fn () => abort(404, 'No query results for model [Order] 1'));
         $router->middleware(['api', 'langsys.locale'])->get('/api/nowhere', fn () => abort(403, __('Not anywhere.')));
+        $router->middleware(['api', 'langsys.locale'])->get('/api/spanish', fn () => abort(403, __('Not yours.', [], 'es-ES')));
     }
 
     public function testTheMessageIsInTheNegotiatedLanguage(): void
@@ -85,6 +86,15 @@ class NegotiatedMessageTest extends TestCase
 
         $this->assertSame('en-us', $this->getJson('/api/orders/1', ['Accept-Language' => 'ja'])->headers->get('Content-Language'));
         $this->assertSame('fr-fr', $this->getJson('/api/own', ['Accept-Language' => 'es'])->headers->get('Content-Language'));
+    }
+
+    /** A catalog line written in the locale its call named is named in that locale, not the request's. */
+    public function testALineInTheLocaleItsCallNamedIsNamedInIt(): void
+    {
+        $response = $this->getJson('/api/spanish', ['Accept-Language' => 'en'])->assertStatus(403);
+
+        $this->assertSame('No es tuyo.', $response->json('message'));
+        $this->assertSame('es-es', $response->headers->get('Content-Language'));
     }
 
     /**

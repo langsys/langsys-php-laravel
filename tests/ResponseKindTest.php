@@ -46,6 +46,7 @@ class ResponseKindTest extends TestCase
     protected function defineRoutes($router): void
     {
         $router->middleware('web')->get('/page', fn () => __('Pay now'));
+        $router->middleware('web')->get('/kind', fn () => \Langsys\Laravel\Http\ResponseKind::current());
         $router->middleware(['web', InertiaMiddleware::class])->get('/spa', fn () => __('Pay now'));
         $router->middleware(['web', InertiaMiddleware::class])->get('/spa/ship', [ShippingController::class, 'ship']);
         $router->middleware(['web', InertiaMiddleware::class])->get('/spa/preview', [ShippingController::class, 'preview']);
@@ -93,6 +94,23 @@ class ResponseKindTest extends TestCase
     public function testAnInertiaVisitGetsTheSource(): void
     {
         $this->get('/page', ['X-Inertia' => 'true'])->assertSeeText('Pay now');
+    }
+
+    /** A request expecting JSON is an API response, answered in the request's language (FRM-5); any other is a page. */
+    public function testARequestExpectingJsonIsAnApiResponse(): void
+    {
+        $this->getJson('/kind')->assertSeeText('api');
+        $this->get('/kind')->assertSeeText('server');
+    }
+
+    /**
+     * A JSON call to a route behind Inertia's middleware — an axios request from the page, not an
+     * Inertia visit — is an API response (FRM-5), and an Inertia visit to the same route is the page.
+     */
+    public function testAJsonCallToAnInertiaRouteIsAnApiResponse(): void
+    {
+        $this->getJson('/spa')->assertSeeText('Pagar ahora');
+        $this->get('/spa', ['X-Inertia' => 'true', 'Accept' => 'application/json'])->assertSeeText('Pay now');
     }
 
     /** Mail is recognised however deep the view that calls `__()` nests inside it. */

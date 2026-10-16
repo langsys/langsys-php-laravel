@@ -12,7 +12,8 @@ use Illuminate\Routing\Route;
 
 /**
  * What the response being served is (FRM-4), decided from Laravel's own structure: a page the
- * server renders, a page its own browser SDK translates (Inertia), or an API response. The app can
+ * server renders, a page its own browser SDK translates (an Inertia visit, or a route behind
+ * Inertia's middleware asked for a page), or an API response (a request expecting JSON). The app can
  * name the kind per route group in `langsys.response_kinds` (`auto`, `server`, `client`).
  *
  * Mail and notifications are read by their recipient, not by the page being served, so while one
@@ -74,11 +75,17 @@ final class ResponseKind
             }
         }
 
-        if ($request->header('X-Inertia') || self::_isInertiaRoute($route)) {
+        // An Inertia visit announces itself. A JSON call a page makes to a route behind Inertia's
+        // middleware is read by that call, not by a page, so only what neither is the route decides.
+        if ($request->header('X-Inertia')) {
             return self::CLIENT;
         }
 
-        return $request->expectsJson() ? self::API : self::SERVER;
+        if ($request->expectsJson()) {
+            return self::API;
+        }
+
+        return self::_isInertiaRoute($route) ? self::CLIENT : self::SERVER;
     }
 
     /** A route behind the application's Inertia middleware renders an Inertia page, first load included. */

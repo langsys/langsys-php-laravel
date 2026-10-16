@@ -192,9 +192,42 @@ class MessagesCommandTest extends TestCase
         $this->assertStringContainsString('UnlistableRequest.lines.*.qty: has no label, so each index', $problems, 'A wildcard field with no label is a template per index.');
         $this->assertStringContainsString(':thing', $problems, "The core refuses a placeholder Laravel never filled (MSG-11).");
         $this->assertStringContainsString('RouteBoundRequest', $problems, 'Rules that need the request cannot be listed without one.');
-        $this->assertStringContainsString('StorePaymentRequest.pin: uses the rule object', $problems, 'Password is a rule object.');
         $this->assertStringContainsString("UnlistableRequest.contact: uses the rule 'phone_number'", $problems, 'An extension rule has no line of Laravel\'s.');
         $this->assertStringNotContainsString("'nullable'", $problems, 'A rule that never fails on its own has nothing to list.');
+    }
+
+    /**
+     * Laravel's `Password` states its message only once it has failed, and no app can give it a
+     * template: each line it can print — its nested rules', and one per requirement it checks — is
+     * listed from Laravel's own lines, a value as a marker, and nothing is reported.
+     */
+    public function testLaravelsPasswordIsListedFromItsLines(): void
+    {
+        if (!method_exists(\Illuminate\Validation\Rules\Password::class, 'appliedRules')) {
+            $this->markTestSkipped('This Laravel does not say which rules a Password applies.');
+        }
+
+        $templates = $this->_templates();
+
+        foreach (['The pin field must be a string.', 'The pin field must be at least {min} characters.', 'The pin field must contain at least one letter.'] as $template) {
+            $this->assertContains($template, $templates);
+        }
+
+        $this->assertNotContains('The pin field must contain at least one number.', $templates, 'A requirement the rule does not check is not listed.');
+        $this->assertStringNotContainsString('StorePaymentRequest.pin', implode("\n", $this->_catalog()->problems()));
+    }
+
+    /**
+     * A rule object of Laravel's that states its message only once it has failed, such as
+     * `Rules\File`, takes no template from the app: it is reported with the fix an app can apply,
+     * a message declared for the field, and listed from that message once declared.
+     */
+    public function testLaravelsRuleObjectWithNoMessageIsReportedWithAFixAnAppCanApply(): void
+    {
+        $catalog = MessageCatalogCommand::collect([new FormRequestSource([\Langsys\Laravel\Tests\Fixtures\Http\UploadRequest::class])]);
+
+        $this->assertSame(["UploadRequest.doc: uses the rule object Illuminate\\Validation\\Rules\\File, which declares no message ahead of time — declare its message in messages() as 'doc.Illuminate\\Validation\\Rules\\File'"], $catalog->problems());
+        $this->assertContains('Upload the scan as a PDF.', array_column($catalog->templates(), 'template'));
     }
 
     /** In migrate mode the listing also names what the lang files cannot carry as they stand (MIG-4). */

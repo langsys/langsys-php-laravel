@@ -219,8 +219,8 @@ class DetectLocaleTest extends TestCase
         $this->assertSame('es', app()->getLocale());
 
         $this->seedCatalog('pt-br', ['__uncategorized__' => []]);
-        $this->getJson('/api/denied?locale=pt-BR')->assertStatus(403)->assertJsonPath('message', 'Não é seu.');
-        $this->assertSame('pt_BR', app()->getLocale(), 'A regional spelling is the app\'s too.');
+        $this->getJson('/api/denied?locale=pt-BR')->assertStatus(403)->assertJsonPath('message', 'Não é seu.')->assertHeader('Content-Language', 'pt-br');
+        $this->assertSame('pt_BR', app()->getLocale(), 'A regional spelling is the app\'s too, and the language its line is named in is the wire\'s (WIRE-3).');
     }
 
     /**

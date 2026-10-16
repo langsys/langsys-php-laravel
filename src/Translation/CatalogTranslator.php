@@ -34,6 +34,15 @@ class CatalogTranslator extends Translator
     /** How many of the latest lines it keeps: a JSON body's `message` is written just before it. */
     private const WRITTEN_KEPT = 64;
 
+    /**
+     * The request attribute holding the call behind each line `__()` and `trans_choice()` returned
+     * this request — key, replacements, count — so the line can be read again in another locale.
+     */
+    private const CALLS = 'langsys.calls';
+
+    /** How many calls it keeps: a FormRequest's messages and labels are read just before it validates. */
+    private const CALLS_KEPT = 512;
+
     /** The call being resolved, for the miss fallback: [argument, replacements, entry point, count, Laravel's locale for it]. */
     private ?array $call = null;
 
@@ -51,17 +60,21 @@ class CatalogTranslator extends Translator
 
     public function get($key, array $replace = [], $locale = null, $fallback = true)
     {
-        if ($this->asLaravel || !is_string($key) || $key === '' || self::_isValidationKey($key) || ($langsys = ($this->langsys)()) === null) {
+        if ($this->asLaravel || !is_string($key) || $key === '' || self::_isValidationKey($key)) {
             return parent::get($key, $replace, $locale, $fallback);
+        }
+
+        if (($langsys = ($this->langsys)()) === null) {
+            return $this->_called(parent::get($key, $replace, $locale, $fallback), $key, $replace, null);
         }
 
         // A key holding a list of lines (`__('enums.status')`) answers the list, as Laravel's does,
         // each line through the catalog: the catalog holds lines, not lists.
-        if ($langsys->client()->resolveLegacyKey($key) === null && is_array($lines = $this->_quietly(fn () => parent::get($key, [], $locale, $fallback)))) {
+        if ($langsys->client()->resolveLegacyKey($key) === null && is_array($lines = $this->quietly(fn () => parent::get($key, [], $locale, $fallback)))) {
             return $this->_lines($key, $lines, $replace, $locale);
         }
 
-        return $this->_resolve($langsys, $key, $replace, $locale, '__', null)['text'];
+        return $this->_called($this->_resolve($langsys, $key, $replace, $locale, '__', null)['text'], $key, $replace, null);
     }
 
     private function _lines(string $key, array $lines, array $replace, ?string $locale): array
@@ -75,15 +88,54 @@ class CatalogTranslator extends Translator
 
     public function choice($key, $number, array $replace = [], $locale = null)
     {
-        if (self::_isValidationKey($key) || ($langsys = ($this->langsys)()) === null) {
+        if (self::_isValidationKey($key)) {
             return parent::choice($key, $number, $replace, $locale);
+        }
+
+        if (($langsys = ($this->langsys)()) === null) {
+            return $this->_called(parent::choice($key, $number, $replace, $locale), $key, $replace, $number);
         }
 
         if (is_countable($number)) {
             $number = count($number);
         }
 
-        return $this->_resolve($langsys, $key, $replace, $locale, 'trans_choice', $number)['text'];
+        return $this->_called($this->_resolve($langsys, $key, $replace, $locale, 'trans_choice', $number)['text'], $key, $replace, $number);
+    }
+
+    /**
+     * What a line `__()` or `trans_choice()` returned this request reads in another locale, read
+     * as that call reads it and told to no missing-key handler; null for text no call returned.
+     * Laravel's validator holds the messages, labels and option words an app reads through
+     * `__()` as the strings `__()` returned in the request's language, and a validation entry is
+     * written from their source.
+     */
+    public function sourceOf(string $text, string $locale): ?string
+    {
+        $call = app()->bound('request') ? (((array) app('request')->attributes->get(self::CALLS, []))[$text] ?? null) : null;
+
+        if ($call === null) {
+            return null;
+        }
+
+        [$key, $replace, $count] = $call;
+        $line = $this->quietly(fn () => $count === null ? $this->get($key, $replace, $locale) : $this->choice($key, $count, $replace, $locale));
+
+        return is_string($line) ? $line : null;
+    }
+
+    /** Notes the call behind a line returned this request, for `sourceOf()`. */
+    private function _called(mixed $line, string $key, array $replace, mixed $count): mixed
+    {
+        if (is_string($line) && app()->bound('request')) {
+            $attributes = app('request')->attributes;
+            $calls = (array) $attributes->get(self::CALLS, []);
+            unset($calls[$line]);
+            $calls[$line] = [$key, $replace, $count];
+            $attributes->set(self::CALLS, count($calls) > self::CALLS_KEPT ? array_slice($calls, -self::CALLS_KEPT, null, true) : $calls);
+        }
+
+        return $line;
     }
 
     public function has($key, $locale = null, $fallback = true)
@@ -95,7 +147,7 @@ class CatalogTranslator extends Translator
         // What Laravel's own files hold, a list included, read as Laravel's has() reads them: the
         // locale and fallback asked for, with the app's missing-key handler off.
         $locale = $locale ?: $this->locale;
-        $line = $this->_quietly(fn () => parent::get($key, [], $locale, $fallback));
+        $line = $this->quietly(fn () => parent::get($key, [], $locale, $fallback));
 
         return !is_null($this->loaded['*']['*'][$locale][$key] ?? null) || $line !== $key;
     }
@@ -148,7 +200,7 @@ class CatalogTranslator extends Translator
         }
 
         foreach ($laravel !== null ? [$laravel] : LaravelLocales::candidates($locale, $this->locale) as $candidate) {
-            $line = $this->_quietly(fn () => parent::get($argument, [], $candidate, false));
+            $line = $this->quietly(fn () => parent::get($argument, [], $candidate, false));
 
             if (is_string($line) && $line !== $argument) {
                 return LegacyValue::fromCall($line, $replace, $entryPoint, $count)['text'];
@@ -253,11 +305,15 @@ class CatalogTranslator extends Translator
         };
         $line = $laravel();
 
-        return $line === $this->_quietly($laravel) ? $answer : ['text' => $line, 'from' => 'fallback'];
+        return $line === $this->quietly($laravel) ? $answer : ['text' => $line, 'from' => 'fallback'];
     }
 
-    /** A read of Laravel's own files that the app's missing-key handler does not hear of: a probe is not a miss. */
-    private function _quietly(Closure $read): mixed
+    /**
+     * A read the app's missing-key handler does not hear of, since a probe is not a miss: a read of
+     * Laravel's own files here, or what builds a validation failure's entries and the listing,
+     * which read in the source language what the app's own calls read in the request's.
+     */
+    public function quietly(Closure $read): mixed
     {
         if (!property_exists($this, 'handleMissingTranslationKeys')) {
             return $read();

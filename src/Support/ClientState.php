@@ -58,7 +58,9 @@ final class ClientState
      * The locale a runtime site hands the core: the one it was given, else the one this request is
      * served in (SRV-6), which DetectLocale records for Laravel's locale. An empty one is none, as
      * in Laravel's own translator. A locale the app sets afterwards is its own and is handed over
-     * as Laravel holds it; the core reads every spelling.
+     * as Laravel holds it; the core reads every spelling. Laravel's locale is its translator's,
+     * the one `__()` reads its lines in, so text read in the source language (a validation
+     * template, the message listing) is looked up in it as well.
      */
     public static function locale(?string $locale = null): string
     {
@@ -66,7 +68,7 @@ final class ClientState
             return $locale;
         }
 
-        $laravel = app()->getLocale();
+        $laravel = app('translator')->getLocale();
         $served = app()->bound('request') ? app('request')->attributes->get(DetectLocale::SERVED) : null;
 
         return is_array($served) && $served[0] === $laravel ? $served[1] : $laravel;

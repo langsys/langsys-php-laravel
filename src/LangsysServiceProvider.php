@@ -50,9 +50,10 @@ class LangsysServiceProvider extends ServiceProvider
             $client = new Client($config['api_key'], $config['project_id'], [
                 'api_url'           => $config['api_url'],
                 'require_credentials' => $config['require_credentials'],
-                // FRM-2: what passes through `__()` or the facade registers through
-                // `langsys:sync`, the package on or off; the core alone registers a sentence
-                // written in from a declared value the last sync did not see (FRM-7).
+                // FRM-2: nothing registers while serving, the package on or off: what passes
+                // through `__()` registers through `langsys:sync`, which does not read a facade
+                // call, and the core alone registers a sentence written in from a declared value
+                // the last sync did not see (FRM-7).
                 'runtime_registration' => false,
                 'value_sets'        => $config['enabled'] ? ValueSetDiscovery::classes() : [],
                 'messages_category' => $config['messages']['category'],

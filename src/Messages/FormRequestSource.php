@@ -2,27 +2,41 @@
 
 namespace Langsys\Laravel\Messages;
 
+use Closure;
 use Illuminate\Contracts\Validation\ValidatorAwareRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Routing\Route;
+use Illuminate\Routing\RouteAction;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationRuleParser;
+use Langsys\Laravel\Support\ClassDiscovery;
+use Langsys\Laravel\Translation\CatalogTranslator;
 use Langsys\SDK\Messages\HasMessageTemplate;
 use Langsys\SDK\Messages\MessageCatalog;
 use Langsys\SDK\Messages\MessageSource;
 use Langsys\SDK\Messages\RuleTemplate;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
+use ReflectionFunction;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Throwable;
 
 /**
  * Every validation message the application's FormRequests can send, listed from the code (MSG-7):
- * each rule of each FormRequest a route's controller action takes, built by `ValidatorMessages`
- * exactly as a failing request builds it. What cannot be listed ahead of time is reported with its
- * fix; until it is fixed it is shown in the source language, since a validation message never
- * registers at runtime.
+ * each rule of each FormRequest a route's action takes, a controller's or a closure's, built by
+ * `ValidatorMessages` exactly as a failing request builds it. What cannot be listed ahead of time
+ * is reported with its fix; until it is fixed it is shown in the source language, since a
+ * validation message never registers at runtime.
+ *
+ * Validation written inline — `$request->validate([...])`, `Validator::make()`, `validator()` —
+ * declares its rules where no listing can read them, so each such call in the app's PHP is
+ * reported with its file and line. A Livewire class is the exception: Livewire shows what it
+ * validates through `$errors` in the component, so none of it reaches a client as entries.
  */
 final class FormRequestSource implements MessageSource
 {
@@ -35,24 +49,24 @@ final class FormRequestSource implements MessageSource
     /** Rules comparing a field with another field's size. */
     private const COMPARED = ['gt', 'gte', 'lt', 'lte'];
 
-    /** @param  list<class-string<FormRequest>>  $classes */
-    public function __construct(private readonly array $classes)
+    /**
+     * @param  list<class-string<FormRequest>>  $classes
+     * @param  array<string, string>  $inline  Each inline validation, `file:line` => the call.
+     */
+    public function __construct(private readonly array $classes, private readonly array $inline = [])
     {
     }
 
-    /** The FormRequests the routes' controller actions take. */
+    /**
+     * The FormRequests the routes' actions take, and the calls that validate inline in the app's
+     * PHP: the directories in `langsys.sync_paths`, else app/ and routes/, Blade files left out.
+     */
     public static function fromRoutes(Router $router): self
     {
         $classes = [];
 
         foreach ($router->getRoutes() as $route) {
-            [$controller, $method] = array_pad(explode('@', $route->getActionName(), 2), 2, null);
-
-            if ($method === null || !method_exists($controller, $method)) {
-                continue;
-            }
-
-            foreach ((new ReflectionMethod($controller, $method))->getParameters() as $parameter) {
+            foreach (self::_actionParameters($route) as $parameter) {
                 $type = $parameter->getType();
 
                 if ($type instanceof ReflectionNamedType && self::_isRequest($type->getName())) {
@@ -61,7 +75,147 @@ final class FormRequestSource implements MessageSource
             }
         }
 
-        return new self(array_keys($classes));
+        $inline = [];
+
+        foreach ((array) (config('langsys.sync_paths') ?: [app_path(), base_path('routes')]) as $directory) {
+            $inline += self::_inlineValidation((string) $directory);
+        }
+
+        return new self(array_keys($classes), $inline);
+    }
+
+    /**
+     * What a route's action takes: a controller method's parameters, or a closure's, the closure
+     * read as Laravel reads it to run the route once `route:cache` has serialized it.
+     *
+     * @return list<\ReflectionParameter>
+     */
+    private static function _actionParameters(Route $route): array
+    {
+        $uses = $route->getAction('uses');
+
+        if (is_string($uses) && RouteAction::containsSerializedClosure($route->getAction())) {
+            $uses = unserialize($uses)->getClosure();
+        }
+
+        if ($uses instanceof Closure) {
+            return (new ReflectionFunction($uses))->getParameters();
+        }
+
+        [$controller, $method] = array_pad(explode('@', $route->getActionName(), 2), 2, null);
+
+        return $method !== null && method_exists($controller, $method) ? (new ReflectionMethod($controller, $method))->getParameters() : [];
+    }
+
+    /**
+     * Each call in a directory's PHP that validates inline, read from the file's tokens: a
+     * `validate()` or `validateWithBag()` handed its rules on the request (`$request`, `request()`)
+     * or on a class validating through Laravel's `ValidatesRequests`, `Validator::make()` or
+     * `Validator::validate()`, and the `validator()` helper. A `validate()` with no arguments
+     * checks a validator built elsewhere, which is reported where it was built; one on any other
+     * object is that object's own. A Blade file is left out: the PHP in it is a view's, or a
+     * Livewire component's (Volt), which shows its validation through `$errors`.
+     *
+     * @return array<string, string>  `file:line` => the call
+     */
+    private static function _inlineValidation(string $directory): array
+    {
+        if (!is_dir($directory)) {
+            return [];
+        }
+
+        $files = [];
+
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory, RecursiveDirectoryIterator::SKIP_DOTS)) as $file) {
+            if ($file->getExtension() === 'php' && !str_ends_with($file->getFilename(), '.blade.php')) {
+                $files[$file->getPathname()] = $file;
+            }
+        }
+
+        ksort($files);
+        $found = [];
+
+        foreach ($files as $path => $file) {
+            $code = (string) $file->openFile()->fread(max(1, $file->getSize()));
+            $class = ClassDiscovery::declaredClass($code);
+            $calls = array_filter(self::_inlineCalls($code), fn (array $call) => $call[2] !== 'this' || self::_validatesRequests($class));
+
+            if ($calls === [] || self::_isLivewire($class)) {
+                continue;
+            }
+
+            // Named as `langsys:sync` names a file it reads: from the app's root.
+            $label = str_starts_with($path, base_path() . DIRECTORY_SEPARATOR) ? substr($path, strlen(base_path()) + 1) : $path;
+
+            foreach ($calls as [$line, $call]) {
+                $found["$label:$line"] = $call;
+            }
+        }
+
+        return $found;
+    }
+
+    /** @return list<array{0: int, 1: string, 2: ?string}> The line, the call, and for `validate()` whose it is: `request` or `this`. */
+    private static function _inlineCalls(string $code): array
+    {
+        $tokens = array_values(array_filter(token_get_all($code), fn ($token) => !is_array($token) || !in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)));
+        $calls = [];
+
+        foreach ($tokens as $i => $token) {
+            if (!is_array($token) || $token[0] !== T_STRING || ($tokens[$i + 1] ?? null) !== '(') {
+                continue;
+            }
+
+            $before = $tokens[$i - 1] ?? null;
+            $operator = is_array($before) ? $before[0] : $before;
+            $name = strtolower($token[1]);
+
+            $receiver = in_array($operator, [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], true) ? self::_receiver($tokens, $i - 2) : null;
+
+            $call = match (true) {
+                in_array($operator, [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], true) => $receiver !== null && in_array($name, ['validate', 'validatewithbag'], true) && ($tokens[$i + 2] ?? null) !== ')' ? "->{$token[1]}()" : null,
+                $operator === T_DOUBLE_COLON => in_array($name, ['make', 'validate'], true) && is_array($tokens[$i - 2] ?? null) && str_ends_with('\\' . $tokens[$i - 2][1], '\\Validator') ? "Validator::{$token[1]}()" : null,
+                default => $name === 'validator' && !in_array($operator, [T_FUNCTION, T_NEW, T_ATTRIBUTE], true) ? 'validator()' : null,
+            };
+
+            if ($call !== null) {
+                $calls[] = [$token[2], $call, $receiver];
+            }
+        }
+
+        return $calls;
+    }
+
+    /** Whose `->` call ends at a token: the request's (`$request`, `request()`), the class's own (`$this`), or another object's. */
+    private static function _receiver(array $tokens, int $end): ?string
+    {
+        $token = $tokens[$end] ?? null;
+
+        return match (true) {
+            is_array($token) && $token[0] === T_VARIABLE && $token[1] === '$request' => 'request',
+            is_array($token) && $token[0] === T_VARIABLE && $token[1] === '$this'    => 'this',
+            $token === ')' && ($tokens[$end - 1] ?? null) === '(' && is_array($tokens[$end - 2] ?? null) && strtolower($tokens[$end - 2][1]) === 'request' => 'request',
+            default => null,
+        };
+    }
+
+    /** A class validating through Laravel's `ValidatesRequests`, as a controller does: `$this->validate($request, [...])`. */
+    private static function _validatesRequests(?string $class): bool
+    {
+        try {
+            return $class !== null && class_exists($class) && in_array(\Illuminate\Foundation\Validation\ValidatesRequests::class, class_uses_recursive($class), true);
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private static function _isLivewire(?string $class): bool
+    {
+        try {
+            return $class !== null && class_exists(\Livewire\Component::class) && (is_subclass_of($class, \Livewire\Component::class) || is_subclass_of($class, \Livewire\Form::class));
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /** A FormRequest, or a laravel-data request DTO: the two ways Laravel apps declare a request's rules. */
@@ -80,9 +234,14 @@ final class FormRequestSource implements MessageSource
         $translator->setLocale(config('app.fallback_locale'));
 
         try {
-            $this->_collect($catalog);
+            // The listing's reads are probes, not misses the app's missing-key handler hears of.
+            $translator instanceof CatalogTranslator ? $translator->quietly(fn () => $this->_collect($catalog)) : $this->_collect($catalog);
         } finally {
             $translator->setLocale($locale);
+        }
+
+        foreach ($this->inline as $where => $call) {
+            $catalog->problem($where, "validates inline with $call, so the messages it can send are not listed", 'declare these rules in a FormRequest a route\'s action takes');
         }
     }
 
@@ -224,11 +383,38 @@ final class FormRequestSource implements MessageSource
             return;
         }
 
+        // A message the app declared for the rule is Laravel's pick over the rule's own, and is the
+        // app's template as a declared message for any rule is.
+        if (($declared = ValidatorMessages::declaredFor($validator, $attribute, get_class($rule))) !== null) {
+            $catalog->add($validator->makeReplacements($declared, $attribute, get_class($rule), []), $source, $field);
+
+            return;
+        }
+
+        // Laravel's `Password` states its messages only once it has failed: each line it can print
+        // is listed from its rules, as a failing request sends it.
+        if ($rule instanceof Password && method_exists($rule, 'appliedRules')) {
+            foreach (ValidatorMessages::forPassword($validator, $attribute, $rule) as $entry) {
+                $catalog->add($entry->getTemplate(), $source, $field);
+            }
+
+            // A rule object it was given is listed, or reported, as one on the field would be.
+            foreach ((array) $rule->appliedRules()['customRules'] as $nested) {
+                if (is_object($nested)) {
+                    $this->_collectRuleObject($catalog, $source, $field, $attribute, $nested, $validator);
+                }
+            }
+
+            return;
+        }
+
         $messages = method_exists($rule, 'message') ? array_filter((array) $rule->message(), 'is_string') : [];
 
-        // `Password` implements Laravel's contract too, but only knows its message once it has failed.
+        // A rule that knows its message only once it has failed, such as Laravel's `File`. One of
+        // Laravel's takes no template from the app, so its fix is a message declared for the field.
         if ($messages === []) {
-            $catalog->problem($source, 'uses the rule object ' . get_class($rule) . ', which declares no message ahead of time', RuleTemplate::missingTemplateProblem('')[1], $field);
+            $fix = str_starts_with(get_class($rule), 'Illuminate\\') ? "declare its message in messages() as '$field." . get_class($rule) . "'" : RuleTemplate::missingTemplateProblem('')[1];
+            $catalog->problem($source, 'uses the rule object ' . get_class($rule) . ', which declares no message ahead of time', $fix, $field);
 
             return;
         }
@@ -253,7 +439,7 @@ final class FormRequestSource implements MessageSource
      * A FormRequest's rules, messages and labels, read without a request: the container does not
      * resolve it, since resolving validates.
      *
-     * @return array{0: array, 1: array, 2: array}
+     * @return array{0: array, 1: array, 2: array, 3: ?\Closure}
      */
     private static function _declared(string $class): array
     {
@@ -276,7 +462,7 @@ final class FormRequestSource implements MessageSource
      * against a payload carrying every nested object and collection, so their rules are listed
      * too: laravel-data only resolves a nested object's rules when the payload has it.
      *
-     * @return array{0: array, 1: array, 2: array}
+     * @return array{0: array, 1: array, 2: array, 3: ?\Closure}
      */
     private static function _dataDeclared(string $class): array
     {

@@ -256,6 +256,122 @@ class ValidatorMessagesTest extends TestCase
     }
 
     /**
+     * MSG-3: each spelling of a placeholder Laravel fills is a marker and no other — `:index` and
+     * `:Index` alike, since Laravel reads a list item's index, position and ordinal position
+     * whatever their case, while `:Input` and `:MIN` stay as written, as Laravel prints them — so
+     * filling the template gives back Laravel's message byte for byte.
+     */
+    public function testEachSpellingLaravelFillsIsAMarkerAndOnlyThose(): void
+    {
+        $ordinals = method_exists(\Illuminate\Validation\Validator::class, 'replaceOrdinalPositionPlaceholder');
+        $validator = Validator::make(
+            ['groups' => [['items' => [['qty' => 1]]], ['items' => [['qty' => 0]]]]],
+            ['groups.*.items.*.qty' => 'integer|min:1'],
+            ['groups.*.items.*.qty.min' => 'Group :index (:Index, :first-index, :ordinal-position, :FIRST-ORDINAL-POSITION), item :second-index (:second-ordinal-position): at least :min, not :MIN or :Min; :Input stays.']
+        );
+        $validator->fails();
+
+        [$entry] = $validator->serverMessages();
+
+        $this->assertSame($validator->errors()->first('groups.1.items.0.qty'), MessageTemplate::fill($entry->getTemplate(), $entry->getParams()));
+        $this->assertSame(
+            $ordinals
+                ? 'Group {index} ({index}, {first_index}, {ordinal_position}, {first_ordinal_position}), item {second_index} ({second_ordinal_position}): at least {min}, not :MIN or :Min; :Input stays.'
+                : 'Group {index} ({index}, {first_index}, :ordinal-position, :FIRST-ORDINAL-POSITION), item {second_index} (:second-ordinal-position): at least {min}, not :MIN or :Min; :Input stays.',
+            $entry->getTemplate()
+        );
+        $expected = ['index' => 1, 'first_index' => 1, 'second_index' => 0, 'min' => 1] + ($ordinals ? ['ordinal_position' => '2nd', 'first_ordinal_position' => '2nd', 'second_ordinal_position' => '1st'] : []);
+        $params = $entry->getParams();
+        ksort($expected);
+        ksort($params);
+        $this->assertSame($expected, $params);
+    }
+
+    /**
+     * Laravel's `Password` sends each line it printed as the listing lists it: a nested rule's with
+     * its value as a marker, a requirement's as Laravel's line, so filling the template gives back
+     * Laravel's message.
+     */
+    public function testLaravelsPasswordSendsTheTemplatesTheListingLists(): void
+    {
+        if (!method_exists(\Illuminate\Validation\Rules\Password::class, 'appliedRules')) {
+            $this->markTestSkipped('This Laravel does not say which rules a Password applies.');
+        }
+
+        $request = new \Langsys\Laravel\Tests\Fixtures\Http\PasswordRequest();
+        $validator = Validator::make(['pin' => 'ab cd'], $request->rules(), $request->messages());
+        $validator->fails();
+
+        $entries = $validator->serverMessages();
+
+        $this->assertSame([
+            ['The pin field must be at least {min} characters.', ['min' => 8]],
+            ['The pin field confirmation does not match.', []],
+            ['The pin may not be more than {max} words.', ['max' => 1]],
+            ['Enter a valid code.', []],
+            ['The pin field must contain at least one uppercase and one lowercase letter.', []],
+            ['Add a number to pin.', []],
+        ], array_map(fn ($entry) => [$entry->getTemplate(), $entry->getParams()], $entries));
+        $this->assertSame($validator->errors()->get('pin'), array_map(fn ($entry) => MessageTemplate::fill($entry->getTemplate(), $entry->getParams()), $entries));
+        $this->assertSame(array_fill(0, 6, \Illuminate\Validation\Rules\Password::class), array_map(fn ($entry) => $entry->getCode(), $entries), 'The code is the class Laravel records the failure under.');
+
+        $catalog = \Langsys\SDK\Messages\MessageCatalogCommand::collect([new \Langsys\Laravel\Messages\FormRequestSource([\Langsys\Laravel\Tests\Fixtures\Http\PasswordRequest::class])]);
+
+        $this->assertEqualsCanonicalizing([
+            'The pin field must be a string.',
+            'The pin field must be at least {min} characters.',
+            'The pin field must not be greater than {max} characters.',
+            'The pin field confirmation does not match.',
+            'The pin may not be more than {max} words.',
+            'Enter a valid code.',
+            'The pin field must contain at least one uppercase and one lowercase letter.',
+            'The pin field must contain at least one letter.',
+            'The pin field must contain at least one symbol.',
+            'Add a number to pin.',
+            'The given pin has appeared in a data leak. Please choose a different pin.',
+        ], array_column($catalog->templates(), 'template'), 'The listing lists every line it can print, a requirement the app worded as the app worded it.');
+        $this->assertStringContainsString('PasswordRequest.pin: is a rule object without a template', implode("\n", $catalog->problems()), 'A rule object given to Password with no template is reported, as anywhere else.');
+    }
+
+    /** A rule's message Laravel files under another field is that field's, as text, and the rule's own field sends none. */
+    public function testAMessageKeyedToAnotherFieldIsThatFieldsText(): void
+    {
+        $validator = Validator::make(['code' => 'x'], ['code' => [new \Langsys\Laravel\Tests\Fixtures\Http\OtherFieldRule()]]);
+        $validator->fails();
+
+        $this->assertSame(['other' => ['Pick another.']], $validator->errors()->messages(), 'Control: Laravel files it under the other field.');
+        $this->assertSame([['other', 'Pick another.']], array_map(fn ($entry) => [$entry->getField(), $entry->getTemplate()], $validator->serverMessages()));
+    }
+
+    /**
+     * MSG-11: each entry a failure sends is handed to the core's `emitMessage()`, in the locale the
+     * request is served in, so the core can warn when a marker carries a value its catalog
+     * translates. The warning is the core's.
+     */
+    public function testEachEntryIsEmittedToTheCoreInTheServedLocale(): void
+    {
+        $client = new class () extends \Langsys\Laravel\Tests\Fakes\FakeClient {
+            /** @var list<array{0: ?string, 1: ?string}> */
+            public array $emitted = [];
+
+            public function emitMessage(\Langsys\SDK\Messages\ServerMessage $message)
+            {
+                $this->emitted[] = [$message->getTemplate(), $this->getLocale()];
+
+                return $message;
+            }
+        };
+        $this->app->instance(\Langsys\SDK\Client::class, $client);
+        $this->app->setLocale('es-ES');
+
+        $validator = Validator::make(['password' => 'short'], ['password' => 'string|min:8', 'name' => 'required']);
+        $validator->fails();
+
+        $this->assertSame([['The password field must be at least {min} characters.', 'es-es'], ['The name field is required.', 'es-es']], $client->emitted);
+        $this->assertSame(array_map(fn ($entry) => $entry->getTemplate(), $validator->serverMessages()), array_column($client->emitted, 0));
+    }
+
+    /**
      * An `after()` hook's message on a field its rules also failed is an entry of its own, its text
      * its template (MSG-9): Laravel runs every rule, then the hooks, so the hook's message follows
      * the rules' — and is never filed under a rule object on that field.

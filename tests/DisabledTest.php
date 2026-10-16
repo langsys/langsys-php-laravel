@@ -46,6 +46,24 @@ class DisabledTest extends TestCase
         $this->assertNull($this->app->make(Client::class)->getLegacyKeys());
     }
 
+    /** Off, the app's classes are not scanned for value sets: the scan loads every class it finds. */
+    public function testTheAppsClassesAreNotScannedWhileOff(): void
+    {
+        $this->app->useAppPath(__DIR__ . '/Fixtures/Discovery/Off');
+        $this->app->forgetInstance(Client::class);
+        $this->app->make(Client::class);
+
+        $this->assertFalse(class_exists(\Langsys\Laravel\Tests\Fixtures\Discovery\Off\Probe::class, false));
+
+        // Control: on, building the client scans them.
+        config()->set('langsys.enabled', true);
+        $this->app->useAppPath(__DIR__ . '/Fixtures/Discovery/On');
+        $this->app->forgetInstance(Client::class);
+        $this->app->make(Client::class);
+
+        $this->assertTrue(class_exists(\Langsys\Laravel\Tests\Fixtures\Discovery\On\Probe::class, false));
+    }
+
     public function testLaravelBuildsItsOwnValidator(): void
     {
         $this->assertSame(LaravelValidator::class, get_class(Validator::make([], ['name' => 'required'])));

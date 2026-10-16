@@ -19,7 +19,8 @@ use Langsys\SDK\Exception\ConfigurationException;
  * FRM-1 and FRM-3: installing the package never breaks the app. With no API key — an app's own tests, CI, a
  * fresh checkout — the catalog is empty by definition, so every translate call is exactly what
  * plain Laravel returns, the pages and forms that use this package's middleware still serve, and
- * no client is ever built. The cause is reported once per process, at debug (FRM-3).
+ * no client is ever built. The cause is reported once per process, at debug (FRM-3): once per request
+ * under PHP-FPM, which starts every request afresh, and once per worker under Octane or a queue worker.
  */
 class NoCredentialsTest extends TestCase
 {
@@ -256,6 +257,16 @@ class NoCredentialsTest extends TestCase
         }
 
         $this->get('/ping')->assertStatus(500);
+    }
+
+    /** The option is read as the core reads it: the string "false", as a config file may hold it, is off. */
+    public function testTheStringFalseLeavesRequireCredentialsOff(): void
+    {
+        config()->set('langsys.require_credentials', 'false');
+
+        $this->assertFalse(ClientState::buildable());
+        __('Save');
+        $this->assertFalse($this->app->resolved(Client::class), 'No client was built.');
     }
 
     /** What Laravel's exception handler is asked to report from here on (Laravel 10 has no Exceptions::fake()). */

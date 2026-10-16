@@ -60,7 +60,7 @@ Republish the config (`php artisan vendor:publish --tag=langsys-config --force`)
 
 ### The locale middleware follows Laravel
 
-`DetectLocale` serves the locale your app set when it set one (its own middleware, a user preference). Only when nothing set it does it resolve one from `langsys.locale.sources`, and every candidate must now be a locale your Langsys project serves, narrowed by `supported`. A resolved choice varies the response on `Cookie` or `Accept-Language`.
+`DetectLocale` serves the locale your app set when it set one (its own middleware, a user preference). Only when nothing set it does it resolve one from `langsys.locale.sources`, and every candidate must now be a locale your Langsys project serves, narrowed by `supported`. A choice read from the cookie or the session varies the response on `Cookie`, and one negotiated from `Accept-Language` on `Accept-Language`; one made in the query string varies on nothing, since the URL already tells caches apart, and is persisted.
 
 ### Middleware constructors
 
