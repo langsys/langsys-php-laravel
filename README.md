@@ -113,14 +113,16 @@ enum OrderStatus: string { case Shipped = 'shipped'; case Delivered = 'delivered
 
 A key's group is its category: `menu.home` and `repairs.home` are two catalog entries, each translated for its own context. A sentence passed as its own key has no category.
 
-Moving lines to another group moves them to another category. Say where they came from, and their translations follow them rather than being translated again:
+Moving lines to another group moves them to another category. Say where they came from:
 
 ```php
 // config/langsys.php — lines now in lang/en/checkout.php used to be in header.php
 'previous_categories' => ['checkout' => 'header'],
 ```
 
-Until the catalog has them under `checkout`, a page shows the `header` translation rather than the source. A move retires the old entry for every use of that text in `header`, so move them all in one release. The entry does nothing once the move is done, and can be deleted whenever convenient.
+Until the catalog has them under `checkout`, a page shows the `header` translation rather than the source. `''` names the lines of your JSON lang file. The entry covers every line in the group, later ones included, so remove it once the move has registered.
+
+Registering the move, so the API copies `header`'s translations and nothing is translated again, belongs to `langsys:sync` and needs a `langsys/langsys-php` release that is not out yet. Until then `langsys:sync` refuses to register while an entry is set: a line registered without its move can never carry it afterwards.
 
 ### Registering — `php artisan langsys:sync`
 

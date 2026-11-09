@@ -119,6 +119,17 @@ class SyncCommand extends Command
             return self::FAILURE;
         }
 
+        // MOVE-3: a move travels only on the registration a miss triggers, so a line registered
+        // under its new group without it is in the catalog there and never registers again — its
+        // translations are not copied, and are made again. The core's plan does not yet take a
+        // move for the base-language lines it registers itself, so a sync with one declared would
+        // lose it for good: it registers nothing until it can send it.
+        if (!$this->option('dry-run') && array_filter((array) config('langsys.previous_categories', []), 'is_string') !== []) {
+            $this->error('langsys:sync cannot send langsys.previous_categories yet, and a line registered without its move can never carry it afterwards, so nothing was registered. Run it again once the move can be sent, or remove the entries to register without moving translations; --dry-run still checks.');
+
+            return self::FAILURE;
+        }
+
         [$hits, $files, $unreadable] = $this->_hits();
         $messages = MessageCatalogCommand::collect([FormRequestSource::fromRoutes($this->laravel['router']), AppMessageSource::discovered()]);
 

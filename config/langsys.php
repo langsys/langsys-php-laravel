@@ -107,12 +107,21 @@ return [
     |
     | A key group is its lines' category, so moving lines from lang/en/header.php
     | to lang/en/checkout.php moves them to `checkout`. Say where they came
-    | from, ['checkout' => 'header'], and their translations follow them:
-    | nothing is translated or charged again, and until the catalog has them
-    | under `checkout` a page shows the `header` translation rather than the
-    | source. `''` is the no-category group. A move retires the old entry for
-    | every use of that text, so move all of them in one release; the entry
-    | can stay as long as you like, and does nothing once the move is done.
+    | from, ['checkout' => 'header'], and until the catalog has them under
+    | `checkout` a page shows the `header` translation rather than the source.
+    | `''` names the lines of your JSON lang file; a sentence no lang file
+    | holds is not moved. A vendor package's group shares the name of the app's
+    | group of the same name, and one entry covers both.
+    |
+    | The entry covers every line in the group, including ones added after the
+    | move, so remove it once the move has registered: left in, a new line
+    | would show, and later move, the old group's translation of the same text.
+    |
+    | Registering the move, which makes the API copy the old group's
+    | translations so nothing is translated or charged again, is langsys:sync's,
+    | and needs a langsys/langsys-php release that is not out yet. Until then,
+    | langsys:sync refuses to register while an entry is set, because a line
+    | registered without its move can never carry it afterwards.
     |
     */
 

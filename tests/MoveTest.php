@@ -93,6 +93,57 @@ class MoveTest extends TestCase
         $this->assertSame('Lee nuestros <a href="/terms">términos</a>', Blade::render("@lang('checkout.terms')"));
     }
 
+    /** A choice resolves through the same key path, and takes the move too. */
+    public function testAChoiceTakesTheMove(): void
+    {
+        config()->set('langsys.previous_categories', ['checkout' => 'header']);
+        $this->catalog(['header' => ['{count, plural, one {# apple} other {# apples}}' => '{count, plural, one {# manzana} other {# manzanas}}']]);
+
+        $this->assertSame('3 manzanas', trans_choice('checkout.apples', 3));
+    }
+
+    /**
+     * `''` names the lines of the JSON lang file; a sentence no lang file holds is a literal and
+     * is never moved, which is what the config says.
+     */
+    public function testTheEmptyGroupCoversJsonLinesAndNotLiterals(): void
+    {
+        config()->set('langsys.previous_categories', ['' => 'header']);
+        $this->catalog(['header' => ['Welcome' => 'Bienvenido', 'Goodbye' => 'Adiós']]);
+
+        $this->assertSame('Bienvenido', __('Welcome'));
+        $this->assertSame('Goodbye', __('Goodbye'));
+    }
+
+    /**
+     * MOVE-3: a line registered under its new group without its move is in the catalog there and
+     * never registers again, so its translations are never copied. Until the core's plan can
+     * carry a move for the lines it registers itself, a sync with one declared registers nothing.
+     */
+    public function testSyncRegistersNothingWhileAMoveIsDeclared(): void
+    {
+        config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/lang-moved']);
+        config()->set('langsys.previous_categories', ['checkout' => 'header']);
+        $this->app->instance(Client::class, $this->fakeClient);
+
+        $this->artisan('langsys:sync')
+            ->expectsOutputToContain('langsys:sync cannot send langsys.previous_categories yet')
+            ->assertExitCode(1);
+        $this->assertSame([], $this->fakeClient->asked);
+    }
+
+    /** The control: with no move declared, and on a dry run with one, the sync goes on to plan. */
+    public function testSyncPlansWithoutAMoveAndOnADryRun(): void
+    {
+        config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/lang-moved']);
+        $this->app->instance(Client::class, $this->fakeClient);
+
+        $this->artisan('langsys:sync')->doesntExpectOutputToContain('cannot send langsys.previous_categories');
+
+        config()->set('langsys.previous_categories', ['checkout' => 'header']);
+        $this->artisan('langsys:sync', ['--dry-run' => true])->doesntExpectOutputToContain('cannot send langsys.previous_categories');
+    }
+
     /**
      * The facade hands the core's moved form over as given. Asserted on what the SDK received: a
      * wrapper that flattened it to the category alone would still render a translation here.
