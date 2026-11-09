@@ -6,14 +6,17 @@ use Illuminate\Support\Facades\Blade;
 use Langsys\Laravel\Facades\Langsys;
 use Langsys\Laravel\LangsysTranslator;
 use Langsys\Laravel\Tests\Fakes\FakeClient;
+use Langsys\Laravel\Translation\MigrationFiles;
 use Langsys\SDK\Client;
+use Langsys\SDK\Sync\Planner;
+use Langsys\SDK\Sync\SyncPlan;
 
 /**
  * MOVE-1 and MOVE-4 at runtime. In Laravel a key group is its lines' category, so moving lines
  * from lang/en/header.php to lang/en/checkout.php moves them to `checkout`, and
- * `langsys.previous_categories` says where they came from. The core does the rest: what renders
- * until the move lands, and what registers. These pin only that the binding hands the move over,
- * and hands it over for the right group, on every path a key is printed through.
+ * `langsys.previous_categories` says where they came from. The core applies that map, and
+ * `langsys.messages.previous_category`, both when it renders and when it plans a sync. These pin
+ * that the binding hands them over, on every path a line is printed or registered through.
  *
  * The catalog seeded here is what the core loads; `checkout` is empty in it, as it is on the first
  * deploy after the move, before the API has copied `header`'s translations over.
@@ -102,46 +105,118 @@ class MoveTest extends TestCase
         $this->assertSame('3 manzanas', trans_choice('checkout.apples', 3));
     }
 
-    /**
-     * `''` names the lines of the JSON lang file; a sentence no lang file holds is a literal and
-     * is never moved, which is what the config says.
-     */
-    public function testTheEmptyGroupCoversJsonLinesAndNotLiterals(): void
+    /** `''` is no category: the JSON lang file's lines and a bare sentence alike (MOVE-1). */
+    public function testTheEmptyGroupCoversJsonLinesAndLiterals(): void
     {
         config()->set('langsys.previous_categories', ['' => 'header']);
         $this->catalog(['header' => ['Welcome' => 'Bienvenido', 'Goodbye' => 'Adiós']]);
 
         $this->assertSame('Bienvenido', __('Welcome'));
-        $this->assertSame('Goodbye', __('Goodbye'));
+        $this->assertSame('Adiós', __('Goodbye'));
+    }
+
+    /** A facade call naming a moved category takes the map: one item stands for every use. */
+    public function testAFacadeCallNamingAMovedCategoryTakesTheMap(): void
+    {
+        config()->set('langsys.previous_categories', ['checkout' => 'header']);
+        $this->catalog(['header' => ['Buy now' => 'Comprá ya']]);
+
+        $this->assertSame('Comprá ya', Langsys::translate('Buy now', 'checkout'));
+        $this->assertSame('Buy now', Langsys::translate('Buy now', 'billing'));
     }
 
     /**
-     * MOVE-3: a line registered under its new group without its move is in the catalog there and
-     * never registers again, so its translations are never copied. Until the core's plan can
-     * carry a move for the lines it registers itself, a sync with one declared registers nothing.
+     * MSG-6: with the messages category renamed, a template the catalog has only under the old
+     * one renders that translation. The core does it; this pins that the setting reaches it.
      */
-    public function testSyncRegistersNothingWhileAMoveIsDeclared(): void
+    public function testAServerMessageRendersFromThePreviousMessagesCategory(): void
     {
-        config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/lang-moved']);
-        config()->set('langsys.previous_categories', ['checkout' => 'header']);
-        $this->app->instance(Client::class, $this->fakeClient);
+        config()->set('langsys.messages.category', 'Messages');
+        config()->set('langsys.messages.previous_category', 'Errors');
+        $this->seedCatalog('es-es', ['Messages' => [], 'Errors' => ['The {attribute} field is required.' => 'El campo {attribute} es obligatorio.']]);
 
-        $this->artisan('langsys:sync')
-            ->expectsOutputToContain('langsys:sync cannot send langsys.previous_categories yet')
-            ->assertExitCode(1);
-        $this->assertSame([], $this->fakeClient->asked);
+        $entry = ['template' => 'The {attribute} field is required.', 'params' => ['attribute' => 'name'], 'message' => 'The name field is required.'];
+
+        $this->assertSame('El campo name es obligatorio.', $this->app->make(Client::class)->translateMessage($entry, 'es-ES'));
+
+        // The control: an empty setting (an unset env var) is no rename, not "had no category":
+        // the uncategorised entry is not read, and the entry falls back to its message.
+        config()->set('langsys.messages.previous_category', '');
+        $this->seedCatalog('es-es', ['Messages' => [], '__uncategorized__' => ['The {attribute} field is required.' => 'Sin categoría {attribute}.']]);
+        $this->app->forgetInstance(Client::class);
+
+        $this->assertSame('The name field is required.', $this->app->make(Client::class)->translateMessage($entry, 'es-ES'));
     }
 
-    /** The control: with no move declared, and on a dry run with one, the sync goes on to plan. */
-    public function testSyncPlansWithoutAMoveAndOnADryRun(): void
+    /**
+     * MOVE-1, MOVE-3: a base-language line no call names registers with its group's move, so the
+     * API copies the old translations. Asserted on the plan handed to the core to send.
+     */
+    public function testSyncRegistersAGroupsLinesWithTheirMove(): void
     {
         config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/lang-moved']);
-        $this->app->instance(Client::class, $this->fakeClient);
-
-        $this->artisan('langsys:sync')->doesntExpectOutputToContain('cannot send langsys.previous_categories');
+        $client = $this->syncClient();
 
         config()->set('langsys.previous_categories', ['checkout' => 'header']);
-        $this->artisan('langsys:sync', ['--dry-run' => true])->doesntExpectOutputToContain('cannot send langsys.previous_categories');
+        $this->artisan('langsys:sync')->assertExitCode(0);
+        $this->assertSame('header', $client->sent['Buy now']['previous_category'] ?? null);
+
+        config()->set('langsys.previous_categories', []);
+        $this->artisan('langsys:sync')->assertExitCode(0);
+        $this->assertArrayNotHasKey('previous_category', $client->sent['Buy now']);
+    }
+
+    /** One item can only have moved from one place: a conflict is reported, and fails `--strict`. */
+    public function testSyncReportsAMoveConflictAndFailsStrict(): void
+    {
+        config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/lang-moved']);
+        $this->syncClient(new SyncPlan([], [], [], [], [], [], [
+            ['phrase' => 'Buy now', 'category' => 'checkout', 'previous_category' => 'header', 'origins' => ['lang/en/checkout.php'], 'left_behind' => ['app/Nav.php:12']],
+        ], [
+            ['phrase' => 'Buy now', 'category' => 'checkout', 'previous_categories' => ['header', 'nav'], 'origins' => ['app/A.php:3 => header', 'app/B.php:9 => nav']],
+        ]));
+
+        $this->artisan('langsys:sync', ['--dry-run' => true])
+            ->expectsOutputToContain('which app/Nav.php:12 still registers it under')
+            ->expectsOutputToContain('app/A.php:3 => header; app/B.php:9 => nav: the first is sent')
+            ->assertExitCode(0);
+
+        $this->artisan('langsys:sync', ['--dry-run' => true, '--strict' => true])->assertExitCode(1);
+    }
+
+    /**
+     * A FakeClient that plans with the core's planner, or returns $plan, and keeps what a sync would send by
+     * phrase instead of sending it.
+     */
+    private function syncClient(?SyncPlan $plan = null): FakeClient
+    {
+        $client = new class extends FakeClient {
+            public ?SyncPlan $plan = null;
+            public array $sent = [];
+
+            public function getProject()
+            {
+                return ['target_locales' => []];
+            }
+
+            // The core's own planner over the fixture's base-language files, with the options the
+            // command hands it: this fake has no catalog or files of its own to plan against.
+            public function planSync(array $hits, array $targets = [], array $options = [])
+            {
+                return $this->plan ?? Planner::offline($hits, MigrationFiles::for(app('translation.loader'), app()->langPath(), 'en'), [], $options);
+            }
+
+            public function applySync(SyncPlan $plan)
+            {
+                $this->sent = array_column($plan->toRegister(), null, 'phrase');
+
+                return ['success' => true, 'registered' => count($this->sent), 'translations' => 0];
+            }
+        };
+        $client->plan = $plan;
+        $this->app->instance(Client::class, $client);
+
+        return $client;
     }
 
     /**

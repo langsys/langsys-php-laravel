@@ -8,7 +8,7 @@ Keep `langsys-php-laravel` and `langsys-php-sdk` side by side, and point a Larav
 
 ```json
 "repositories": [
-    { "type": "path", "url": "../langsys-php-sdk", "options": { "symlink": true, "versions": { "langsys/langsys-php": "2.1.0" } } },
+    { "type": "path", "url": "../langsys-php-sdk", "options": { "symlink": true, "versions": { "langsys/langsys-php": "2.2.0" } } },
     { "type": "path", "url": "../langsys-php-laravel", "options": { "symlink": true } }
 ],
 "require": {
@@ -16,7 +16,7 @@ Keep `langsys-php-laravel` and `langsys-php-sdk` side by side, and point a Larav
 }
 ```
 
-The `versions` entry lets the core's feature branch satisfy this package's `^2.1`. Then:
+The `versions` entry lets the core's feature branch satisfy this package's `^2.2`. Then:
 
 ```bash
 composer update langsys/langsys-php-laravel langsys/langsys-php

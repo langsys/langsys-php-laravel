@@ -119,17 +119,6 @@ class SyncCommand extends Command
             return self::FAILURE;
         }
 
-        // MOVE-3: a move travels only on the registration a miss triggers, so a line registered
-        // under its new group without it is in the catalog there and never registers again — its
-        // translations are not copied, and are made again. The core's plan does not yet take a
-        // move for the base-language lines it registers itself, so a sync with one declared would
-        // lose it for good: it registers nothing until it can send it.
-        if (!$this->option('dry-run') && array_filter((array) config('langsys.previous_categories', []), 'is_string') !== []) {
-            $this->error('langsys:sync cannot send langsys.previous_categories yet, and a line registered without its move can never carry it afterwards, so nothing was registered. Run it again once the move can be sent, or remove the entries to register without moving translations; --dry-run still checks.');
-
-            return self::FAILURE;
-        }
-
         [$hits, $files, $unreadable] = $this->_hits();
         $messages = MessageCatalogCommand::collect([FormRequestSource::fromRoutes($this->laravel['router']), AppMessageSource::discovered()]);
 
@@ -139,6 +128,8 @@ class SyncCommand extends Command
             'covered_groups'   => $this->_validatorGroups(),
             'message_classes'  => AppMessageDiscovery::classes(),
             'listed_templates' => array_column($messages->templates(), 'template'),
+            // MOVE-1: the Client applies the map itself; a plan made without one needs it handed.
+            'previous_categories' => (array) config('langsys.previous_categories', []),
         ];
 
         try {
@@ -228,9 +219,26 @@ class SyncCommand extends Command
                 : "  {$call['file']}:{$call['line']}: {$call['entry_point']}() prints \"{$call['phrase']}\", a message the listing registers under its category");
         }
 
+        // MOVE-1: a move retires the old item for every use, so a call still registering the text
+        // under the old category drops out of the Translation Manager. Advice, never a failure.
+        foreach ($plan->leftBehind as $move) {
+            $this->warn("  \"{$move['phrase']}\" moves to " . self::_category($move['category']) . ' from ' . self::_category($move['previous_category']) . ', which ' . implode(', ', $move['left_behind']) . ' still registers it under: move that call too, or drop the move');
+        }
+
+        // MOVE-1: one item can only have moved from one place; the first in path and line order is
+        // sent, and `--strict` fails.
+        foreach ($plan->moveConflicts as $conflict) {
+            $this->warn("✗ \"{$conflict['phrase']}\" in " . self::_category($conflict['category']) . ' is named as moved from more than one category, ' . implode('; ', $conflict['origins']) . ': the first is sent');
+        }
+
         foreach ($plan->reported as $call) {
             $this->warn("✗ {$call['file']}:{$call['line']}: {$call['entry_point']}() is called with something that is not a literal, so it cannot be registered ahead of time");
         }
+    }
+
+    private static function _category(?string $category): string
+    {
+        return $category === null || $category === '' ? 'no category' : "`$category`";
     }
 
     /**

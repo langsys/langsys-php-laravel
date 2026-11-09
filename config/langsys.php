@@ -107,21 +107,19 @@ return [
     |
     | A key group is its lines' category, so moving lines from lang/en/header.php
     | to lang/en/checkout.php moves them to `checkout`. Say where they came
-    | from, ['checkout' => 'header'], and until the catalog has them under
-    | `checkout` a page shows the `header` translation rather than the source.
-    | `''` names the lines of your JSON lang file; a sentence no lang file
-    | holds is not moved. A vendor package's group shares the name of the app's
-    | group of the same name, and one entry covers both.
+    | from, ['checkout' => 'header'], and langsys:sync registers them with the
+    | move, so the API copies the `header` translations rather than having
+    | them translated and charged again; until the catalog has them under
+    | `checkout`, a page shows the `header` translation rather than the
+    | source. An entry covers everything under its category: every key in the
+    | group, and a `__()` or facade call naming that category. `''` is no
+    | category: your JSON lang file's lines and every bare sentence. A vendor
+    | package's group shares the name of the app's group of the same name, and
+    | one entry covers both.
     |
-    | The entry covers every line in the group, including ones added after the
-    | move, so remove it once the move has registered: left in, a new line
-    | would show, and later move, the old group's translation of the same text.
-    |
-    | Registering the move, which makes the API copy the old group's
-    | translations so nothing is translated or charged again, is langsys:sync's,
-    | and needs a langsys/langsys-php release that is not out yet. Until then,
-    | langsys:sync refuses to register while an entry is set, because a line
-    | registered without its move can never carry it afterwards.
+    | Remove the entry once the move has registered: left in, a line added to
+    | the group later would show, and register with, the old category's
+    | translation of the same text.
     |
     */
 
@@ -155,6 +153,16 @@ return [
 
     'messages' => [
         'category' => env('LANGSYS_MESSAGES_CATEGORY', 'Errors'),
+
+        /*
+         * The category the templates were under before `category` was renamed,
+         * so each registers with the move and renders the old translation
+         * until it is translated under the new one. Set it, as the category,
+         * identically on every client SDK that renders the entries. It wins
+         * over a `previous_categories` entry for the messages category. Empty
+         * means not renamed.
+         */
+        'previous_category' => env('LANGSYS_MESSAGES_PREVIOUS_CATEGORY'),
 
         /*
          * Where the entries sit in your error responses. Laravel's own body is

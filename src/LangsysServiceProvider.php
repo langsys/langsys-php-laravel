@@ -57,6 +57,10 @@ class LangsysServiceProvider extends ServiceProvider
                 'runtime_registration' => false,
                 'value_sets'        => $config['enabled'] ? ValueSetDiscovery::classes() : [],
                 'messages_category' => $config['messages']['category'],
+                // MOVE-1, MSG-6: a renamed group, or messages category, names where its lines were.
+                // The core applies both when it renders and when it plans a sync.
+                'previous_categories'        => $config['previous_categories'] ?? [],
+                'messages_previous_category' => ($config['messages']['previous_category'] ?? null) === '' ? null : ($config['messages']['previous_category'] ?? null),
                 'request_locale'    => RequestLocaleWiring::options(),
                 'snapshot'          => $snapshot = self::_snapshot($config['snapshot'] ?? null),
                 'migration'         => $config['enabled']
