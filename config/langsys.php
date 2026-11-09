@@ -112,7 +112,7 @@ return [
     | them translated and charged again; until the catalog has them under
     | `checkout`, a page shows the `header` translation rather than the
     | source. An entry covers everything under its category: every key in the
-    | group, and a `__()` or facade call naming that category. `''` is no
+    | group, and a `Langsys::translate()` call naming it. `''` is no
     | category: your JSON lang file's lines and every bare sentence. A vendor
     | package's group shares the name of the app's group of the same name, and
     | one entry covers both.

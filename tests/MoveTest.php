@@ -191,18 +191,42 @@ class MoveTest extends TestCase
         $this->assertArrayNotHasKey('previous_category', $client->sent['Buy now']);
     }
 
-    /** One item can only have moved from one place: a conflict is reported, and fails `--strict`. */
-    public function testSyncReportsAMoveConflictAndFailsStrict(): void
+    /** A dry run with no key plans with no Client, so the map reaches the planner from the config. */
+    public function testAKeylessDryRunPlansTheMove(): void
+    {
+        config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/lang-moved']);
+        config()->set('langsys.api_key', null);
+        $this->app->forgetInstance(Client::class);
+        config()->set('langsys.previous_categories', ['checkout' => 'header']);
+
+        $this->artisan('langsys:sync', ['--dry-run' => true, '-v' => true])
+            ->expectsOutputToContain('No key')
+            ->expectsOutputToContain('moved from `header`')
+            ->assertExitCode(0);
+    }
+
+    /** A use a move leaves behind is advice: it never fails `--strict`. */
+    public function testALeftBehindUseIsAdviceEvenUnderStrict(): void
     {
         config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/lang-moved']);
         $this->syncClient(new SyncPlan([], [], [], [], [], [], [
             ['phrase' => 'Buy now', 'category' => 'checkout', 'previous_category' => 'header', 'origins' => ['lang/en/checkout.php'], 'left_behind' => ['app/Nav.php:12']],
-        ], [
+        ]));
+
+        $this->artisan('langsys:sync', ['--dry-run' => true, '--strict' => true])
+            ->expectsOutputToContain('which app/Nav.php:12 still registers it under')
+            ->assertExitCode(0);
+    }
+
+    /** One item can only have moved from one place: a conflict is reported, and fails `--strict`. */
+    public function testSyncReportsAMoveConflictAndFailsStrict(): void
+    {
+        config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/lang-moved']);
+        $this->syncClient(new SyncPlan([], [], [], [], [], [], [], [
             ['phrase' => 'Buy now', 'category' => 'checkout', 'previous_categories' => ['header', 'nav'], 'origins' => ['app/A.php:3 => header', 'app/B.php:9 => nav']],
         ]));
 
         $this->artisan('langsys:sync', ['--dry-run' => true])
-            ->expectsOutputToContain('which app/Nav.php:12 still registers it under')
             ->expectsOutputToContain('app/A.php:3 => header; app/B.php:9 => nav: the first is sent')
             ->assertExitCode(0);
 

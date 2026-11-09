@@ -128,7 +128,8 @@ class SyncCommand extends Command
             'covered_groups'   => $this->_validatorGroups(),
             'message_classes'  => AppMessageDiscovery::classes(),
             'listed_templates' => array_column($messages->templates(), 'template'),
-            // MOVE-1: the Client applies the map itself; a plan made without one needs it handed.
+            // MOVE-1: the map the provider gave the Client, handed over again so a keyless plan,
+            // made with no Client, moves what a real sync would.
             'previous_categories' => (array) config('langsys.previous_categories', []),
         ];
 
@@ -196,7 +197,8 @@ class SyncCommand extends Command
 
         if ($this->output->isVerbose()) {
             foreach ($plan->toRegister() as $item) {
-                $this->line('  ' . $item['phrase'] . ($item['category'] === null ? '' : "  <fg=gray>{$item['category']}</>"));
+                $this->line('  ' . $item['phrase'] . ($item['category'] === null ? '' : "  <fg=gray>{$item['category']}</>")
+                    . (isset($item['previous_category']) ? '  <fg=gray>moved from ' . self::_category($item['previous_category']) . '</>' : ''));
             }
         }
 
