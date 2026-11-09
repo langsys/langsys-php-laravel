@@ -71,7 +71,8 @@ class FakeClient extends Client
     {
         $this->asked[] = $phrase;
         $locale = $locale !== null ? LocaleDetector::normalize($locale) : $this->getLocale();
-        $category = $this->normalizeCategory($category);
+        // The core's moved form (MOVE-1) names the category the phrase is under now.
+        $category = $this->normalizeCategory($this->splitCategory($category)[0]);
 
         if ($locale === null) {
             return $this->getInterpolator()->interpolate($phrase, $params, null);

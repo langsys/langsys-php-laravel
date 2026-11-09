@@ -112,6 +112,7 @@ class BindingBoundaryTest extends TestCase
         'messages.classes'            => 'MSG-7 wiring: app messages kept outside app/, as value_sets is for FRM-7',
         'messages.pieces'             => 'the names of an entry\'s pieces in the application\'s own error body (MSG-1)',
         'messages.response_key'       => 'where the entries sit in the application\'s own error body (MSG-1)',
+        'previous_categories'         => "MOVE-1 wiring: the core's moved category form, for a key group whose lines came from another",
         'project_id'                  => 'core option',
         'require_credentials'         => 'core option, under its own name (WIRE-4)',
         'response_kinds'              => 'FRM-4 wiring: the kind of response a route group serves, when the app names it',

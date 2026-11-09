@@ -240,7 +240,7 @@ class CatalogTranslator extends Translator
         $legacy = $client->resolveLegacyKey($key);
 
         if ($legacy !== null) {
-            [$phrase, $category, $params] = [$legacy['phrase'], $legacy['category'], $entryPoint === 'trans_choice' ? $values + ['count' => $count] : $values];
+            [$phrase, $category, $params] = [$legacy['phrase'], self::_moved($legacy['category']), $entryPoint === 'trans_choice' ? $values + ['count' => $count] : $values];
             $argument = $key;
         } else {
             $call = LegacyValue::fromCall($key, $values, $entryPoint, $count);
@@ -257,7 +257,7 @@ class CatalogTranslator extends Translator
         try {
             $answer = $rich
                 ? $langsys->translateRich($phrase, $category, $params, $locale)
-                : $langsys->resolve($legacy !== null ? $argument : $phrase, null, $params, $locale);
+                : $langsys->resolve($legacy !== null ? $argument : $phrase, is_array($category) ? $category : null, $params, $locale);
         } finally {
             $this->call = null;
         }
@@ -275,6 +275,23 @@ class CatalogTranslator extends Translator
         }
 
         return $rich ? $answer : $this->_written($answer, $locale);
+    }
+
+    /**
+     * A key group's category, in the core's moved form when the app says its lines came from
+     * another (`langsys.previous_categories`, MOVE-1): the core then renders the previous
+     * category's translation until the catalog has the line under its own (MOVE-4). Which item
+     * registers, and under what, stays the core's: the move is never part of a line's identity
+     * (MOVE-2).
+     *
+     * @return string|array{category: ?string, previous_category: string}|null
+     */
+    private static function _moved(?string $category): string|array|null
+    {
+        $previous = (array) config('langsys.previous_categories', []);
+        $from = $previous[$category ?? ''] ?? null;
+
+        return is_string($from) ? ['category' => $category, 'previous_category' => $from] : $category;
     }
 
     /**

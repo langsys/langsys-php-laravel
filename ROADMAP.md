@@ -11,15 +11,17 @@ Graded row by row in `CONFORMANCE.md`. The design decisions and deferred work be
 
 This branch depends on the 838 `langsys/langsys-php` core (`34cc23f`): `resetRequestState()`, `resolveRequestLocale()`, `resolve()`, `translateRich()`, `markResolved()`, `useMissFallback()`, `planSync()` / `applySync()`, the value-set declarations, the rule-object and app-message templates, the offline planner, the server-message API, the snapshot seam, the client without credentials and its `require_credentials` option, an excluded element kept whole inside a phrase, a scanner that reads a rich line and a rich choice, the reference-list reads, script and style bodies kept byte for byte, and `translate()` / `translatePage()` that never throw. v1.3.1 has none of that. `composer.json` still says `^1.3`, which resolves to v1.3.1 from Packagist, so:
 
+- **Moving lines between key groups needs the core's 2.1.0** (`feature/move_previous_category`, `e51afcd`, untagged), so `feature/move_previous_category` here requires `^2.1`. Its sync half waits on two core options asked of langsys-php on 2026-11-09: `previous_category` for the base-language lines the planner registers itself, and for the messages category (MSG-6). Until then a declared move renders right but `langsys:sync` does not send it.
+- **The contract double this branch vendors predates every 2.x core.** It is the standalone double at langsys-js-typescript tree `d7f89b89`, which reads `translations` on `POST /translatable-items` as a locale map; the 2.x core sends the list form, so 13 `SyncContractTest` tests answer 422 against any 2.x core, with or without the move. The core now runs its contract tier through the forwarder to an SDK test clone. Moving this suite there is hc811's to decide.
 - **CI fails on this branch by design.** It installs from Packagist, and against v1.3.1 the suite calls core methods that release does not have.
 - **At publication**, the constraint moves to the core's 838 tag and the local path repository (below) goes. The operator publishes every SDK at once, after all of them are green.
 
 ### Decided: the local path repository stays uncommitted
 
-For local development, `composer.json` carries a `repositories` path entry pointing at `../langsys-php-sdk` with `symlink: true`, plus a `versions` override pinning `langsys/langsys-php` to `1.3.1`. It is never committed, and the mesh's end-of-day sweep carries it as a standing exception.
+For local development, `composer.json` carries a `repositories` path entry pointing at `../langsys-php-sdk` with `symlink: true`, plus a `versions` override pinning `langsys/langsys-php` to `2.1.0`. It is never committed, and the mesh's end-of-day sweep carries it as a standing exception.
 
 - **The path is machine-specific.**
-- **The `versions` override is a local fiction.** The checkout sits on an untagged feature branch past v1.3.1, and without the override it resolves as `dev-*` and fails `^1.3`. Committed, it would let anyone who clones this repo beside their own `langsys-php-sdk` build silently against whatever uncommitted state that tree holds, believing they had the Packagist release.
+- **The `versions` override is a local fiction.** The checkout sits on an untagged feature branch, and without the override it resolves as `dev-*` and fails `^2.1`. Committed, it would let anyone who clones this repo beside their own `langsys-php-sdk` build silently against whatever uncommitted state that tree holds, believing they had the Packagist release.
 - **Consumers are unaffected either way.** Composer ignores a dependency's `repositories`, so the hazard is to developers of this package, not users of it.
 - **It is also a live integration check.** The SDK's uncommitted edits run in this suite without a reinstall, so a core change that breaks the wrapper shows up here before it is tagged.
 

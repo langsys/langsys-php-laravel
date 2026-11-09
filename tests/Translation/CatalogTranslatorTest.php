@@ -159,14 +159,14 @@ class CatalogTranslatorTest extends TestCase
                 parent::__construct($client);
             }
 
-            public function resolve(string $phrase, ?string $category = null, array $params = [], ?string $locale = null): array
+            public function resolve(string $phrase, string|array|null $category = null, array $params = [], ?string $locale = null): array
             {
                 $this->asked->append($phrase);
 
                 return parent::resolve($phrase, $category, $params, $locale);
             }
 
-            public function translateRich(string $sourceHtml, ?string $category = null, array $params = [], ?string $locale = null): array
+            public function translateRich(string $sourceHtml, string|array|null $category = null, array $params = [], ?string $locale = null): array
             {
                 $this->asked->append($sourceHtml);
 

@@ -102,6 +102,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Moved categories
+    |--------------------------------------------------------------------------
+    |
+    | A key group is its lines' category, so moving lines from lang/en/header.php
+    | to lang/en/checkout.php moves them to `checkout`. Say where they came
+    | from, ['checkout' => 'header'], and their translations follow them:
+    | nothing is translated or charged again, and until the catalog has them
+    | under `checkout` a page shows the `header` translation rather than the
+    | source. `''` is the no-category group. A move retires the old entry for
+    | every use of that text, so move all of them in one release; the entry
+    | can stay as long as you like, and does nothing once the move is done.
+    |
+    */
+
+    'previous_categories' => [],
+
+    /*
+    |--------------------------------------------------------------------------
     | Catalog snapshot
     |--------------------------------------------------------------------------
     |

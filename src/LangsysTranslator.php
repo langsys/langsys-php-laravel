@@ -34,13 +34,17 @@ class LangsysTranslator
      * registers for it — building the string first (sprintf) would look up a
      * new string per runtime value, which no catalog holds.
      *
+     * $category also takes the core's moved form, `['category' => 'Checkout',
+     * 'previous_category' => 'Header']` (MOVE-1), handed over as given: the
+     * core decides what registers and what renders until the move lands.
+     *
      * Everything past the locale is the SDK's, and its result is returned as
      * is. Client::translate() never throws and falls back to the interpolated
      * source phrase on every degraded path — an unreachable API, a registered
      * but untranslated phrase (WIRE-4, CAT-2) — so a fallback here could only
      * drift from the SDK's own.
      */
-    public function translate(string $phrase, ?string $category = null, array $params = [], ?string $locale = null): string
+    public function translate(string $phrase, string|array|null $category = null, array $params = [], ?string $locale = null): string
     {
         // The locale this request is served in, not Client::getLocale(), which
         // auto-detects from $_SERVER and can spend an HTTP call working out the
@@ -56,7 +60,7 @@ class LangsysTranslator
      *
      * @return array{text: string, from: string}
      */
-    public function resolve(string $phrase, ?string $category = null, array $params = [], ?string $locale = null): array
+    public function resolve(string $phrase, string|array|null $category = null, array $params = [], ?string $locale = null): array
     {
         return $this->client->resolve($phrase, ClientState::locale($locale), $category, $params);
     }
@@ -67,7 +71,7 @@ class LangsysTranslator
      *
      * @return array{html: string, from: string}
      */
-    public function translateRich(string $sourceHtml, ?string $category = null, array $params = [], ?string $locale = null): array
+    public function translateRich(string $sourceHtml, string|array|null $category = null, array $params = [], ?string $locale = null): array
     {
         return $this->client->translateRich($sourceHtml, ClientState::locale($locale), $category, $params);
     }
