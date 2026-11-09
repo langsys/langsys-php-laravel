@@ -205,6 +205,24 @@ class MoveTest extends TestCase
             ->assertExitCode(0);
     }
 
+    /**
+     * A keyless dry run moves what it plans under the messages category too (MSG-6), as a real
+     * sync does: here a key group shares the category's name. Needs langsys-php 2.2.1's offline
+     * options.
+     */
+    public function testAKeylessDryRunPlansTheMessagesCategorysMove(): void
+    {
+        config()->set('langsys.sync_paths', [__DIR__ . '/Fixtures/lang-moved']);
+        config()->set('langsys.api_key', null);
+        $this->app->forgetInstance(Client::class);
+        config()->set('langsys.messages.category', 'checkout');
+        config()->set('langsys.messages.previous_category', 'Errors');
+
+        $this->artisan('langsys:sync', ['--dry-run' => true, '-v' => true])
+            ->expectsOutputToContain('moved from `Errors`')
+            ->assertExitCode(0);
+    }
+
     /** A use a move leaves behind is advice: it never fails `--strict`. */
     public function testALeftBehindUseIsAdviceEvenUnderStrict(): void
     {

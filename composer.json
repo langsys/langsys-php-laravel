@@ -14,7 +14,7 @@
         "ext-intl": "*",
         "illuminate/contracts": "^10.0 || ^11.0 || ^12.0",
         "illuminate/support": "^10.0 || ^11.0 || ^12.0",
-        "langsys/langsys-php": "^2.2"
+        "langsys/langsys-php": "^2.2.1"
     },
     "require-dev": {
         "inertiajs/inertia-laravel": "^2.0 || ^3.3",

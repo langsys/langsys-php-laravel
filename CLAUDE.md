@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this package is
 
-`langsys/langsys-php-laravel` — a **Laravel wrapper** over the dependency-free [`langsys/langsys-php`](https://github.com/langsys/langsys-php) (sibling checkout at `../langsys-php-sdk`, pinned `^2.2`). The vanilla SDK owns the HTTP client, phrase lookup, **interpolation**, token discovery/queueing, and catalog caching. This package adds **only** Laravel-native concerns. When a behavior belongs to lookup/HTTP/interpolation/queueing, the fix goes upstream in `langsys-php`, not here.
+`langsys/langsys-php-laravel` — a **Laravel wrapper** over the dependency-free [`langsys/langsys-php`](https://github.com/langsys/langsys-php) (sibling checkout at `../langsys-php-sdk`, pinned `^2.2.1`). The vanilla SDK owns the HTTP client, phrase lookup, **interpolation**, token discovery/queueing, and catalog caching. This package adds **only** Laravel-native concerns. When a behavior belongs to lookup/HTTP/interpolation/queueing, the fix goes upstream in `langsys-php`, not here.
 
 **Do not reimplement upstream behavior in this repo.** A second copy of the core's interpolation or locale negotiation drifts from the original, and can reproduce a bug the original has already fixed. Delegate and pass through. Before inventing a mechanism, check whether the SDK (or plain HTML) already has one: `TranslateResponse` needs no skip marker of its own, because `translate="no"`, which both SDKs honour, is that marker.
 

@@ -130,7 +130,9 @@ class SyncCommand extends Command
             'listed_templates' => array_column($messages->templates(), 'template'),
             // MOVE-1: the map the provider gave the Client, handed over again so a keyless plan,
             // made with no Client, moves what a real sync would.
-            'previous_categories' => (array) config('langsys.previous_categories', []),
+            'previous_categories'        => (array) config('langsys.previous_categories', []),
+            'messages_category'          => config('langsys.messages.category'),
+            'messages_previous_category' => config('langsys.messages.previous_category'),
         ];
 
         try {
