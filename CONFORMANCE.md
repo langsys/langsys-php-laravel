@@ -173,7 +173,7 @@ Found by executing code against the rules — a probe, a real-core test, a contr
 
 ## Spec 8.7.1: moving content between categories (MOVE-1 to MOVE-5, MSG-6), not yet graded into Status
 
-The Status table grades 8.5.9. These rows come from the 8.7.1 text, read in the API repo's `docs/sdk-spec.mdx` at `dfc8976c`, against the core's `v2.2.0` (`43ce1b5`) and its 2.2.1 fix `a6cf712` (not tagged). Their header is deliberately not the Status table's, so *Computed summary* does not count them; they join it at the regrade against a committed 8.7.1 blob. Every core row they lean on is `provisional` on mock evidence in the core's own file, so nothing here is graded above it.
+The Status table grades 8.5.9. These rows come from the 8.7.1 text, read in the API repo's `docs/sdk-spec.mdx` at `dfc8976c`, against the core's `v2.2.0` (`43ce1b5`) and `v2.2.1` (`9585bc5`), installed from Packagist for the suite run. Their header is deliberately not the Status table's, so *Computed summary* does not count them; they join it at the regrade against a committed 8.7.1 blob. Every core row they lean on is `provisional` on mock evidence in the core's own file, so nothing here is graded above it.
 
 In Laravel a key group is its lines' category (FRM-2), so a move is lines leaving one group file for another, declared as `langsys.previous_categories` (`['checkout' => 'header']`); a renamed messages category is `langsys.messages.previous_category`. Both are handed to the core as its `previous_categories` and `messages_previous_category` Client options, which the core applies when it renders and when it plans a sync. The binding keeps no copy of the map.
 
