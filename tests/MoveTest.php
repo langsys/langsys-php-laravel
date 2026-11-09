@@ -139,13 +139,38 @@ class MoveTest extends TestCase
 
         $this->assertSame('El campo name es obligatorio.', $this->app->make(Client::class)->translateMessage($entry, 'es-ES'));
 
-        // The control: an empty setting (an unset env var) is no rename, not "had no category":
-        // the uncategorised entry is not read, and the entry falls back to its message.
+        // `''` is a value: the templates had no category before, so the uncategorised entry is read.
         config()->set('langsys.messages.previous_category', '');
         $this->seedCatalog('es-es', ['Messages' => [], '__uncategorized__' => ['The {attribute} field is required.' => 'Sin categoría {attribute}.']]);
         $this->app->forgetInstance(Client::class);
 
+        $this->assertSame('Sin categoría name.', $this->app->make(Client::class)->translateMessage($entry, 'es-ES'));
+
+        // The control: no setting is no rename, and the entry falls back to its message.
+        config()->set('langsys.messages.previous_category', null);
+        $this->app->forgetInstance(Client::class);
+
         $this->assertSame('The name field is required.', $this->app->make(Client::class)->translateMessage($entry, 'es-ES'));
+    }
+
+    /** An empty env var is an unset one, not "had no category" (MSG-6). */
+    public function testAnEmptyMessagesPreviousCategoryEnvVarIsUnset(): void
+    {
+        $config = static fn () => (require __DIR__ . '/../config/langsys.php')['messages']['previous_category'];
+
+        putenv('LANGSYS_MESSAGES_PREVIOUS_CATEGORY=');
+        $_ENV['LANGSYS_MESSAGES_PREVIOUS_CATEGORY'] = $_SERVER['LANGSYS_MESSAGES_PREVIOUS_CATEGORY'] = '';
+
+        try {
+            $this->assertNull($config());
+
+            putenv('LANGSYS_MESSAGES_PREVIOUS_CATEGORY=Errors');
+            $_ENV['LANGSYS_MESSAGES_PREVIOUS_CATEGORY'] = $_SERVER['LANGSYS_MESSAGES_PREVIOUS_CATEGORY'] = 'Errors';
+            $this->assertSame('Errors', $config());
+        } finally {
+            putenv('LANGSYS_MESSAGES_PREVIOUS_CATEGORY');
+            unset($_ENV['LANGSYS_MESSAGES_PREVIOUS_CATEGORY'], $_SERVER['LANGSYS_MESSAGES_PREVIOUS_CATEGORY']);
+        }
     }
 
     /**

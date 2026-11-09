@@ -159,10 +159,11 @@ return [
          * so each registers with the move and renders the old translation
          * until it is translated under the new one. Set it, as the category,
          * identically on every client SDK that renders the entries. It wins
-         * over a `previous_categories` entry for the messages category. Empty
-         * means not renamed.
+         * over a `previous_categories` entry for the messages category. An
+         * empty env var means not renamed; set `''` here to say the templates
+         * had no category before.
          */
-        'previous_category' => env('LANGSYS_MESSAGES_PREVIOUS_CATEGORY'),
+        'previous_category' => env('LANGSYS_MESSAGES_PREVIOUS_CATEGORY') === '' ? null : env('LANGSYS_MESSAGES_PREVIOUS_CATEGORY'),
 
         /*
          * Where the entries sit in your error responses. Laravel's own body is
